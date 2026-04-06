@@ -1,7 +1,13 @@
 import React, { useState, useEffect } from "react";
 import { PortfolioData, StockPortfolio, Stock } from "../types";
 import { Card, Badge, Table } from "../components/UI";
-import { formatCurrency, calculateSIPInvested } from "../lib/utils";
+import { 
+  formatCurrency, 
+  calculateSIPInvested, 
+  calculateRDInvested, 
+  calculateRDValue, 
+  calculateFDValue 
+} from "../lib/utils";
 import { 
   TrendingUp, 
   TrendingDown, 
@@ -44,11 +50,9 @@ export default function Dashboard({ data }: { data: PortfolioData }) {
   );
   
   const fdInvested = data.investments.fd.reduce((sum, f) => sum + f.principal, 0);
-  const rdInvested = data.investments.rd.reduce((sum, r) => {
-    const years = (new Date(r.maturityDate).getTime() - new Date(r.startDate).getTime()) / (1000 * 60 * 60 * 24 * 365);
-    const months = Math.round(years * 12);
-    return sum + (r.monthlyDeposit * months);
-  }, 0);
+  const rdInvested = data.investments.rd.reduce((sum, r) => 
+    sum + calculateRDInvested(r.monthlyDeposit, r.startDate, r.maturityDate), 0
+  );
 
   const totalInvested = mfInvested + stockInvested + fdInvested + rdInvested;
 
@@ -58,8 +62,12 @@ export default function Dashboard({ data }: { data: PortfolioData }) {
     sum + p.holdings.reduce((s, h) => s + (h.quantity * h.currentPrice), 0), 0
   );
 
-  const fdCurrent = fdInvested; // Simplified
-  const rdCurrent = rdInvested; // Simplified
+  const fdCurrent = data.investments.fd.reduce((sum, f) => 
+    sum + calculateFDValue(f.principal, f.interestRate, f.startDate, f.maturityDate), 0
+  );
+  const rdCurrent = data.investments.rd.reduce((sum, r) => 
+    sum + calculateRDValue(r.monthlyDeposit, r.interestRate, r.startDate, r.maturityDate), 0
+  );
 
   const totalCurrent = mfCurrent + stockCurrent + fdCurrent + rdCurrent;
   const totalPnL = totalCurrent - totalInvested;
@@ -134,9 +142,9 @@ export default function Dashboard({ data }: { data: PortfolioData }) {
 
       {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <Card className="border-l-4 border-l-emerald-500">
+        <Card className="border-l-4 border-l-emerald-500 bg-emerald-500/5 shadow-[0_0_20px_rgba(16,185,129,0.05)]">
           <p className="text-sm font-medium text-slate-400">Net Worth</p>
-          <h3 className="text-2xl font-bold mt-1">{formatCurrency(netWorth)}</h3>
+          <h3 className="text-2xl font-bold mt-1 text-emerald-50">{formatCurrency(netWorth)}</h3>
           <div className="flex items-center gap-1 mt-2 text-emerald-500 text-xs font-bold">
             <TrendingUp className="w-3 h-3" />
             Assets - Liabilities
@@ -266,14 +274,15 @@ export default function Dashboard({ data }: { data: PortfolioData }) {
 
       {/* Stock Portfolios Breakdown */}
       {data.investments.stockPortfolios.length > 0 && (
-        <Card title="Stock Portfolios Breakdown" subtitle="Performance by portfolio">
+        <Card title="Stock Portfolios Breakdown" subtitle="Performance by individual portfolio">
           <Table 
             headers={[
               { label: "Portfolio" },
               { label: "Broker" },
               { label: "Invested" },
               { label: "Current" },
-              { label: "P&L" }
+              { label: "P&L" },
+              { label: "Holdings" }
             ]}
           >
             {data.investments.stockPortfolios.map(p => {
@@ -282,9 +291,9 @@ export default function Dashboard({ data }: { data: PortfolioData }) {
               const pnl = current - invested;
               const pnlPerc = invested > 0 ? (pnl / invested) * 100 : 0;
               return (
-                <tr key={p.id} className="hover:bg-slate-800/30 transition-colors">
+                <tr key={p.id} className="hover:bg-slate-800/30 transition-colors group">
                   <td className="px-4 py-4">
-                    <div className="font-semibold text-slate-200">{p.name}</div>
+                    <div className="font-semibold text-slate-200 group-hover:text-emerald-400 transition-colors">{p.name}</div>
                     <div className="text-xs text-slate-500">{p.ownerName}</div>
                   </td>
                   <td className="px-4 py-4">
@@ -300,9 +309,33 @@ export default function Dashboard({ data }: { data: PortfolioData }) {
                       {pnlPerc.toFixed(1)}%
                     </div>
                   </td>
+                  <td className="px-4 py-4">
+                    <div className="flex -space-x-2 overflow-hidden">
+                      {p.holdings.slice(0, 3).map((h, i) => (
+                        <div key={i} className="inline-flex items-center justify-center w-8 h-8 text-[10px] font-bold text-white bg-slate-800 border-2 border-slate-900 rounded-full" title={h.companyName}>
+                          {h.ticker.slice(0, 2)}
+                        </div>
+                      ))}
+                      {p.holdings.length > 3 && (
+                        <div className="flex items-center justify-center w-8 h-8 text-[10px] font-bold text-slate-400 bg-slate-800 border-2 border-slate-900 rounded-full">
+                          +{p.holdings.length - 3}
+                        </div>
+                      )}
+                    </div>
+                  </td>
                 </tr>
               );
             })}
+            <tr className="bg-slate-900/50 border-t border-slate-800">
+              <td colSpan={2} className="px-4 py-4 font-bold text-slate-400">Total Stocks</td>
+              <td className="px-4 py-4 font-bold text-slate-200">{formatCurrency(stockInvested)}</td>
+              <td className="px-4 py-4 font-bold text-emerald-500">{formatCurrency(stockCurrent)}</td>
+              <td colSpan={2} className="px-4 py-4">
+                <div className={cn("font-bold", stockPnL >= 0 ? "text-emerald-500" : "text-rose-500")}>
+                  {formatCurrency(stockPnL)} ({stockPnLPerc.toFixed(1)}%)
+                </div>
+              </td>
+            </tr>
           </Table>
         </Card>
       )}

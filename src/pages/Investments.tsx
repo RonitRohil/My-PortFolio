@@ -2,7 +2,19 @@ import React, { useState, useEffect } from "react";
 import { PortfolioData, MutualFund, Stock, FixedDeposit, RecurringDeposit, InvestmentStatus, MFCategory, LumpsumEntry, StockPortfolio, BrokerType } from "../types";
 import { Card, Button, Input, Select, Table, Modal, Badge } from "../components/UI";
 import { Plus, Trash2, Edit2, TrendingUp, Search, Calendar, DollarSign, PlusCircle, MinusCircle, Briefcase, User, Building2, FileUp, AlertTriangle } from "lucide-react";
-import { formatCurrency, formatDate, calculateSIPInvested, cn, calculateWeightedAverage, parseCSV } from "../lib/utils";
+import { 
+  formatCurrency, 
+  formatDate, 
+  calculateSIPInvested, 
+  cn, 
+  calculateWeightedAverage, 
+  parseCSV,
+  calculateRDInvested,
+  calculateRDValue,
+  calculateFDValue,
+  calculateMaturityAmount,
+  calculateRDMaturityAmount
+} from "../lib/utils";
 
 type InvestmentTab = 'mf' | 'stocks' | 'fd' | 'rd';
 
@@ -229,6 +241,10 @@ export default function Investments({ data, updateData }: { data: PortfolioData,
       reader.onload = (event) => {
         const csv = event.target?.result as string;
         const rows = parseCSV(csv);
+        if (rows.length === 0) {
+          alert("No data found in the CSV file.");
+          return;
+        }
         
         const portfolio = data.investments.stockPortfolios.find(p => p.id === portfolioId);
         if (!portfolio) return;
@@ -240,25 +256,53 @@ export default function Investments({ data, updateData }: { data: PortfolioData,
 
         const existingHoldings = [...portfolio.holdings];
 
+        // Helper to find a column by multiple possible names (case-insensitive)
+        const findCol = (row: any, aliases: string[]) => {
+          const keys = Object.keys(row);
+          const aliasLower = aliases.map(a => a.toLowerCase());
+          const key = keys.find(k => aliasLower.includes(k.toLowerCase().trim()));
+          return key ? row[key] : undefined;
+        };
+
         rows.forEach(row => {
           let ticker = "";
           let companyName = "";
           let quantity = 0;
           let avgPrice = 0;
 
+          // Helper to parse numeric strings with potential commas or symbols
+          const parseNum = (val: any) => {
+            if (val === undefined || val === null || val === "") return NaN;
+            if (typeof val !== 'string') return Number(val);
+            // Remove currency symbols, commas, and other non-numeric chars except . and -
+            const clean = val.replace(/[^0-9.-]/g, '').trim();
+            return Number(clean);
+          };
+
+          let currentPrice = 0;
+
           if (broker === 'Groww') {
-            companyName = row['Stock Name'] || "";
+            companyName = findCol(row, ['Stock Name', 'Stock', 'Company', 'Instrument']) || "";
             ticker = companyName.split(' ')[0].toUpperCase(); // Heuristic
-            quantity = Number(row['Quantity']);
-            avgPrice = Number(row['Average Price']);
+            quantity = parseNum(findCol(row, ['Quantity', 'Qty', 'Shares']));
+            avgPrice = parseNum(findCol(row, ['Average buy price', 'Average Price', 'Avg Price', 'Avg Cost', 'Buy Price']));
+            currentPrice = parseNum(findCol(row, ['Closing price', 'LTP', 'Current Price', 'Market Price', 'Live Price']));
           } else if (broker === 'Zerodha') {
-            ticker = row['Instrument'] || "";
+            ticker = findCol(row, ['Instrument', 'Symbol', 'Ticker']) || "";
             companyName = ticker;
-            quantity = Number(row['Qty']);
-            avgPrice = Number(row['Avg cost']);
+            quantity = parseNum(findCol(row, ['Qty.', 'Qty', 'Quantity', 'Shares']));
+            avgPrice = parseNum(findCol(row, ['Avg. cost', 'Avg cost', 'Average Price', 'Avg Price', 'Buy Price']));
+            currentPrice = parseNum(findCol(row, ['LTP', 'Current Price', 'Market Price', 'Live Price']));
+          } else {
+            // Generic fallback
+            ticker = findCol(row, ['Ticker', 'Symbol', 'Instrument']) || "";
+            companyName = findCol(row, ['Stock Name', 'Company', 'Stock']) || ticker;
+            quantity = parseNum(findCol(row, ['Quantity', 'Qty', 'Qty.', 'Shares']));
+            avgPrice = parseNum(findCol(row, ['Average Price', 'Avg Price', 'Avg Cost', 'Avg. cost', 'Buy Price']));
+            currentPrice = parseNum(findCol(row, ['LTP', 'Current Price', 'Market Price', 'Live Price']));
           }
 
-          if (ticker && !isNaN(quantity) && !isNaN(avgPrice)) {
+          if (ticker && !isNaN(quantity) && !isNaN(avgPrice) && quantity > 0) {
             const existing = existingHoldings.find(h => h.ticker === ticker);
             if (existing) updated++;
             else added++;
@@ -269,7 +313,7 @@ export default function Investments({ data, updateData }: { data: PortfolioData,
               ticker,
               quantity,
               avgBuyPrice: avgPrice,
-              currentPrice: existing?.currentPrice || avgPrice // Keep existing current price if available
+              currentPrice: !isNaN(currentPrice) && currentPrice > 0 ? currentPrice : (existing?.currentPrice || avgPrice)
             });
           }
         });
@@ -391,6 +435,17 @@ export default function Investments({ data, updateData }: { data: PortfolioData,
           <div className="space-y-6">
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div className="flex items-center gap-2 p-1 bg-slate-800/50 rounded-xl">
+                <button
+                  onClick={() => setActivePortfolioId('all')}
+                  className={cn(
+                    "px-3 py-1.5 rounded-lg text-xs font-bold transition-all",
+                    activePortfolioId === 'all' 
+                      ? "bg-emerald-500 text-white shadow-sm" 
+                      : "text-slate-400 hover:text-slate-200"
+                  )}
+                >
+                  All Portfolios
+                </button>
                 {data.investments.stockPortfolios.map((p) => (
                   <button
                     key={p.id}
@@ -414,7 +469,7 @@ export default function Investments({ data, updateData }: { data: PortfolioData,
                 </button>
               </div>
 
-              {activePortfolioId && (
+              {activePortfolioId && activePortfolioId !== 'all' && (
                 <div className="flex items-center gap-2">
                   <Button 
                     variant="secondary" 
@@ -451,10 +506,25 @@ export default function Investments({ data, updateData }: { data: PortfolioData,
               <>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   {(() => {
-                    const p = data.investments.stockPortfolios.find(p => p.id === activePortfolioId);
-                    if (!p) return null;
-                    const invested = p.holdings.reduce((sum, h) => sum + (h.quantity * h.avgBuyPrice), 0);
-                    const current = p.holdings.reduce((sum, h) => sum + (h.quantity * h.currentPrice), 0);
+                    let invested = 0;
+                    let current = 0;
+                    let broker = "Multiple";
+                    let owner = "Multiple";
+
+                    if (activePortfolioId === 'all') {
+                      data.investments.stockPortfolios.forEach(p => {
+                        invested += p.holdings.reduce((sum, h) => sum + (h.quantity * h.avgBuyPrice), 0);
+                        current += p.holdings.reduce((sum, h) => sum + (h.quantity * h.currentPrice), 0);
+                      });
+                    } else {
+                      const p = data.investments.stockPortfolios.find(p => p.id === activePortfolioId);
+                      if (!p) return null;
+                      invested = p.holdings.reduce((sum, h) => sum + (h.quantity * h.avgBuyPrice), 0);
+                      current = p.holdings.reduce((sum, h) => sum + (h.quantity * h.currentPrice), 0);
+                      broker = p.broker;
+                      owner = p.ownerName;
+                    }
+
                     const pnl = current - invested;
                     const pnlPerc = invested > 0 ? (pnl / invested) * 100 : 0;
                     return (
@@ -462,8 +532,8 @@ export default function Investments({ data, updateData }: { data: PortfolioData,
                         <div className="p-4 bg-slate-800/30 rounded-2xl border border-slate-800">
                           <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Broker / Owner</p>
                           <div className="flex items-center gap-2 mt-1">
-                            <Badge variant="info">{p.broker}</Badge>
-                            <span className="text-sm text-slate-300 font-medium">{p.ownerName}</span>
+                            <Badge variant="info">{broker}</Badge>
+                            <span className="text-sm text-slate-300 font-medium">{owner}</span>
                           </div>
                         </div>
                         <div className="p-4 bg-slate-800/30 rounded-2xl border border-slate-800">
@@ -494,38 +564,66 @@ export default function Investments({ data, updateData }: { data: PortfolioData,
                   onSort={handleSort}
                   sortConfig={sortConfig || undefined}
                 >
-                  {getSortedData(data.investments.stockPortfolios.find(p => p.id === activePortfolioId)?.holdings || []).map((stock: Stock) => {
-                    const invested = stock.quantity * stock.avgBuyPrice;
-                    const current = stock.quantity * stock.currentPrice;
-                    const pnl = current - invested;
-                    const pnlPerc = invested > 0 ? (pnl / invested) * 100 : 0;
-                    return (
-                      <tr key={stock.id} className="hover:bg-slate-800/30 transition-colors">
-                        <td className="px-4 py-4">
-                          <div className="font-semibold text-slate-200">{stock.companyName}</div>
-                          <div className="text-xs text-slate-500 font-mono">{stock.ticker}</div>
-                        </td>
-                        <td className="px-4 py-4 text-slate-300">{stock.quantity}</td>
-                        <td className="px-4 py-4 text-slate-400">{formatCurrency(stock.avgBuyPrice)}</td>
-                        <td className="px-4 py-4 text-slate-200">{formatCurrency(stock.currentPrice)}</td>
-                        <td className="px-4 py-4 font-bold text-slate-100">{formatCurrency(current)}</td>
-                        <td className="px-4 py-4">
-                          <div className={cn("font-bold", pnl >= 0 ? "text-emerald-500" : "text-rose-500")}>
-                            {formatCurrency(pnl)}
-                          </div>
-                          <div className={cn("text-[10px]", pnl >= 0 ? "text-emerald-600" : "text-rose-600")}>
-                            {pnlPerc.toFixed(1)}%
-                          </div>
-                        </td>
-                        <td className="px-4 py-4">
-                          <div className="flex items-center gap-2">
-                            <button onClick={() => { setEditingItem(stock); setIsModalOpen(true); }} className="p-2 text-slate-400 hover:text-emerald-500 transition-colors"><Edit2 className="w-4 h-4" /></button>
-                            <button onClick={() => deleteItem(stock.id)} className="p-2 text-slate-400 hover:text-rose-500 transition-colors"><Trash2 className="w-4 h-4" /></button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
+                  {(() => {
+                    let holdings: Stock[] = [];
+                    if (activePortfolioId === 'all') {
+                      // Group by ticker
+                      const grouped = new Map<string, Stock>();
+                      data.investments.stockPortfolios.forEach(p => {
+                        p.holdings.forEach(h => {
+                          const existing = grouped.get(h.ticker);
+                          if (existing) {
+                            const totalQty = existing.quantity + h.quantity;
+                            const weightedAvg = (existing.quantity * existing.avgBuyPrice + h.quantity * h.avgBuyPrice) / totalQty;
+                            grouped.set(h.ticker, {
+                              ...existing,
+                              quantity: totalQty,
+                              avgBuyPrice: weightedAvg,
+                              currentPrice: h.currentPrice // Use latest current price
+                            });
+                          } else {
+                            grouped.set(h.ticker, { ...h });
+                          }
+                        });
+                      });
+                      holdings = Array.from(grouped.values());
+                    } else {
+                      holdings = data.investments.stockPortfolios.find(p => p.id === activePortfolioId)?.holdings || [];
+                    }
+
+                    return getSortedData(holdings).map((stock: Stock) => {
+                      const invested = stock.quantity * stock.avgBuyPrice;
+                      const current = stock.quantity * stock.currentPrice;
+                      const pnl = current - invested;
+                      const pnlPerc = invested > 0 ? (pnl / invested) * 100 : 0;
+                      return (
+                        <tr key={stock.id} className="hover:bg-slate-800/30 transition-colors">
+                          <td className="px-4 py-4">
+                            <div className="font-semibold text-slate-200">{stock.companyName}</div>
+                            <div className="text-xs text-slate-500 font-mono">{stock.ticker}</div>
+                          </td>
+                          <td className="px-4 py-4 text-slate-300">{stock.quantity}</td>
+                          <td className="px-4 py-4 text-slate-400">{formatCurrency(stock.avgBuyPrice)}</td>
+                          <td className="px-4 py-4 text-slate-200">{formatCurrency(stock.currentPrice)}</td>
+                          <td className="px-4 py-4 font-bold text-slate-100">{formatCurrency(current)}</td>
+                          <td className="px-4 py-4">
+                            <div className={cn("font-bold", pnl >= 0 ? "text-emerald-500" : "text-rose-500")}>
+                              {formatCurrency(pnl)}
+                            </div>
+                            <div className={cn("text-[10px]", pnl >= 0 ? "text-emerald-600" : "text-rose-600")}>
+                              {pnlPerc.toFixed(1)}%
+                            </div>
+                          </td>
+                          <td className="px-4 py-4">
+                            <div className="flex items-center gap-2">
+                              <button onClick={() => { setEditingItem(stock); setIsModalOpen(true); }} className="p-2 text-slate-400 hover:text-emerald-500 transition-colors"><Edit2 className="w-4 h-4" /></button>
+                              <button onClick={() => deleteItem(stock.id)} className="p-2 text-slate-400 hover:text-rose-500 transition-colors"><Trash2 className="w-4 h-4" /></button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    });
+                  })()}
                 </Table>
               </>
             ) : (
@@ -554,14 +652,21 @@ export default function Investments({ data, updateData }: { data: PortfolioData,
           >
             {getSortedData(data.investments.fd).map((fd: FixedDeposit) => {
               const years = (new Date(fd.maturityDate).getTime() - new Date(fd.startDate).getTime()) / (1000 * 60 * 60 * 24 * 365);
-              const maturityAmt = fd.principal * Math.pow(1 + (fd.interestRate/100)/4, 4 * years);
+              const maturityAmt = calculateMaturityAmount(fd.principal, fd.interestRate, years, 4);
+              const currentValue = calculateFDValue(fd.principal, fd.interestRate, fd.startDate, fd.maturityDate);
               return (
                 <tr key={fd.id} className="hover:bg-slate-800/30 transition-colors">
                   <td className="px-4 py-4 font-semibold text-slate-200">{fd.bankName}</td>
-                  <td className="px-4 py-4 text-emerald-500 font-bold">{formatCurrency(fd.principal)}</td>
+                  <td className="px-4 py-4">
+                    <div className="text-emerald-500 font-bold">{formatCurrency(fd.principal)}</div>
+                    <div className="text-[10px] text-slate-500">Invested</div>
+                  </td>
                   <td className="px-4 py-4 text-slate-300">{fd.interestRate}%</td>
                   <td className="px-4 py-4 text-slate-400">{formatDate(fd.maturityDate)}</td>
-                  <td className="px-4 py-4 text-emerald-400 font-bold">{formatCurrency(maturityAmt)}</td>
+                  <td className="px-4 py-4">
+                    <div className="text-emerald-400 font-bold">{formatCurrency(currentValue)}</div>
+                    <div className="text-[10px] text-slate-500">Maturity: {formatCurrency(maturityAmt)}</div>
+                  </td>
                   <td className="px-4 py-4">
                     <div className="flex items-center gap-2">
                       <button onClick={() => { setEditingItem(fd); setIsModalOpen(true); }} className="p-2 text-slate-400 hover:text-emerald-500"><Edit2 className="w-4 h-4" /></button>
@@ -588,16 +693,26 @@ export default function Investments({ data, updateData }: { data: PortfolioData,
             sortConfig={sortConfig || undefined}
           >
             {getSortedData(data.investments.rd).map((rd: RecurringDeposit) => {
-              const months = Math.round((new Date(rd.maturityDate).getTime() - new Date(rd.startDate).getTime()) / (1000 * 60 * 60 * 24 * 30));
-              const r = (rd.interestRate / 100) / 12;
-              const maturityAmt = rd.monthlyDeposit * (Math.pow(1 + r, months) - 1) / r * (1 + r);
+              const years = (new Date(rd.maturityDate).getTime() - new Date(rd.startDate).getTime()) / (1000 * 60 * 60 * 24 * 365);
+              const months = Math.round(years * 12);
+              const maturityAmt = calculateRDMaturityAmount(rd.monthlyDeposit, rd.interestRate, months);
+              
+              const invested = calculateRDInvested(rd.monthlyDeposit, rd.startDate, rd.maturityDate);
+              const currentValue = calculateRDValue(rd.monthlyDeposit, rd.interestRate, rd.startDate, rd.maturityDate);
+              
               return (
                 <tr key={rd.id} className="hover:bg-slate-800/30 transition-colors">
                   <td className="px-4 py-4 font-semibold text-slate-200">{rd.bankName}</td>
-                  <td className="px-4 py-4 text-emerald-500 font-bold">{formatCurrency(rd.monthlyDeposit)}</td>
+                  <td className="px-4 py-4">
+                    <div className="text-emerald-500 font-bold">{formatCurrency(invested)}</div>
+                    <div className="text-[10px] text-slate-500">{formatCurrency(rd.monthlyDeposit)}/mo</div>
+                  </td>
                   <td className="px-4 py-4 text-slate-300">{rd.interestRate}%</td>
                   <td className="px-4 py-4 text-slate-400">{formatDate(rd.maturityDate)}</td>
-                  <td className="px-4 py-4 text-emerald-400 font-bold">{formatCurrency(maturityAmt)}</td>
+                  <td className="px-4 py-4">
+                    <div className="text-emerald-400 font-bold">{formatCurrency(currentValue)}</div>
+                    <div className="text-[10px] text-slate-500">Maturity: {formatCurrency(maturityAmt)}</div>
+                  </td>
                   <td className="px-4 py-4">
                     <div className="flex items-center gap-2">
                       <button onClick={() => { setEditingItem(rd); setIsModalOpen(true); }} className="p-2 text-slate-400 hover:text-emerald-500"><Edit2 className="w-4 h-4" /></button>

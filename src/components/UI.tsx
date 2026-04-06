@@ -61,11 +61,13 @@ export function Button({
   );
 }
 
-export function Input({ label, error, className, ...props }: React.InputHTMLAttributes<HTMLInputElement> & { label?: string, error?: string }) {
+export function Input({ label, error, className, type, ...props }: React.InputHTMLAttributes<HTMLInputElement> & { label?: string, error?: string }) {
   return (
     <div className="space-y-1.5">
       {label && <label className="text-sm font-medium text-slate-400 ml-1">{label}</label>}
       <input 
+        type={type}
+        step={type === 'number' ? 'any' : undefined}
         className={cn(
           "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-all placeholder:text-slate-600",
           error && "border-rose-500 focus:ring-rose-500/50 focus:border-rose-500",
