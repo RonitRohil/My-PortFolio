@@ -1,0 +1,5 @@
+{
+  "name": "My Portfolio",
+  "description": "A complete personal finance portfolio management web app with local storage persistence and Indian Rupee formatting.",
+  "requestFramePermissions": []
+}
