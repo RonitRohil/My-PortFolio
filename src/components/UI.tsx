@@ -162,7 +162,7 @@ export function Table({ headers, children, onSort, sortConfig }: {
                   {header.label}
                   {sortConfig && header.key && sortConfig.key === header.key && (
                     <span className="text-emerald-500">
-                      {sortConfig.direction === 'asc' ? '↑' : '↓'}
+                      {sortConfig.direction === 'asc' ? '^' : 'v'}
                     </span>
                   )}
                 </div>

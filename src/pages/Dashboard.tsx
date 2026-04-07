@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { PortfolioData } from "../types";
 import { Badge, Button, Card, Table } from "../components/UI";
 import {
@@ -17,6 +17,7 @@ import {
   getMutualFundInvestedAmount,
   countUnlinkedTransactions,
   filterByMonth,
+  getUnlinkedEntries,
 } from "../lib/utils";
 import {
   Area,
@@ -47,6 +48,12 @@ import { analyzePortfolio } from "../services/geminiService";
 export default function Dashboard({ data, setActiveTab }: { data: PortfolioData; setActiveTab: (tab: string) => void }) {
   const [insights, setInsights] = useState<string[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [chartsReady, setChartsReady] = useState(false);
+
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setChartsReady(true));
+    return () => cancelAnimationFrame(id);
+  }, []);
 
   const bankBalance = data.bankAccounts.reduce((sum, account) => sum + account.balance, 0);
   const mfInvested = data.investments.mutualFunds.reduce((sum, fund) => sum + getMutualFundInvestedAmount(fund), 0);
@@ -83,6 +90,8 @@ export default function Dashboard({ data, setActiveTab }: { data: PortfolioData;
   const monthExpense = filterByMonth(data.expenses, now.getFullYear(), now.getMonth()).reduce((sum, entry) => sum + entry.amount, 0);
   const monthTransfers = filterByMonth(data.transfers, now.getFullYear(), now.getMonth());
   const unlinkedCount = countUnlinkedTransactions(data);
+  const unlinkedEntries = getUnlinkedEntries(data);
+  const unlinkedTransactionCount = unlinkedEntries.income.length + unlinkedEntries.expenses.length;
 
   const allocationData = [
     { name: "Mutual Funds", value: mfCurrent },
@@ -98,6 +107,11 @@ export default function Dashboard({ data, setActiveTab }: { data: PortfolioData;
     const result = await analyzePortfolio(data);
     setInsights(result);
     setIsAnalyzing(false);
+  };
+
+  const handleAssignNow = () => {
+    sessionStorage.setItem("transactions_filter_mode", "unassigned");
+    setActiveTab("transactions");
   };
 
   return (
@@ -133,11 +147,14 @@ export default function Dashboard({ data, setActiveTab }: { data: PortfolioData;
       {unlinkedCount > 0 && (
         <Card className="border-amber-500/20 bg-amber-500/5 print:hidden">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <div className="text-sm text-slate-200">
-              {unlinkedCount} transactions need account assignment.
+            <div className="space-y-1 text-sm text-slate-200">
+              <div>{unlinkedCount} items need account assignment.</div>
+              <div className="text-xs text-slate-400">
+                Income: {unlinkedEntries.income.length}, Expenses: {unlinkedEntries.expenses.length}, Recurring rules: {unlinkedEntries.recurringRules.length}
+              </div>
             </div>
-            <Button variant="secondary" onClick={() => setActiveTab("income")}>
-              Assign Now
+            <Button variant="secondary" onClick={handleAssignNow}>
+              Assign Now{unlinkedTransactionCount !== unlinkedCount ? ` (${unlinkedTransactionCount} transactions)` : ""}
             </Button>
           </div>
         </Card>
@@ -229,9 +246,10 @@ export default function Dashboard({ data, setActiveTab }: { data: PortfolioData;
 
         <div className="grid grid-cols-1 gap-8 xl:grid-cols-2 print:grid-cols-1">
           <Card title="Income vs Expense" subtitle={`Recent monthly cashflow (${periodLabel}).`} className="min-w-0">
-            <div className="mt-4 h-[300px] min-w-0 w-full">
-              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={300}>
-                <BarChart data={cashflowData}>
+            <div className="mt-4 h-[300px] min-w-0 w-full min-h-[300px]">
+              {chartsReady && (
+                <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={1}>
+                  <BarChart data={cashflowData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
                   <XAxis dataKey="month" stroke="#64748b" tickLine={false} axisLine={false} />
                   <YAxis
@@ -244,15 +262,17 @@ export default function Dashboard({ data, setActiveTab }: { data: PortfolioData;
                   <Legend iconType="circle" />
                   <Bar dataKey="income" fill="#10b981" radius={[6, 6, 0, 0]} />
                   <Bar dataKey="expense" fill="#f43f5e" radius={[6, 6, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
             </div>
           </Card>
 
           <Card title="Net Worth Trend" subtitle="Derived trailing 12-month view." className="min-w-0">
-            <div className="mt-4 h-[300px] min-w-0 w-full">
-              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={300}>
-                <AreaChart data={netWorthTrend}>
+            <div className="mt-4 h-[300px] min-w-0 w-full min-h-[300px]">
+              {chartsReady && (
+                <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={1}>
+                  <AreaChart data={netWorthTrend}>
                   <defs>
                     <linearGradient id="netWorthGradient" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%" stopColor="#10b981" stopOpacity={0.45} />
@@ -264,17 +284,19 @@ export default function Dashboard({ data, setActiveTab }: { data: PortfolioData;
                   <YAxis stroke="#64748b" tickLine={false} axisLine={false} tickFormatter={(value) => `₹${Math.round(value / 1000)}k`} />
                   <Tooltip contentStyle={{ backgroundColor: "#0f172a", border: "1px solid #1e293b", borderRadius: 12 }} />
                   <Area type="monotone" dataKey="netWorth" stroke="#10b981" fill="url(#netWorthGradient)" strokeWidth={2} />
-                </AreaChart>
-              </ResponsiveContainer>
+                  </AreaChart>
+                </ResponsiveContainer>
+              )}
             </div>
           </Card>
         </div>
 
         <div className="grid grid-cols-1 gap-8 xl:grid-cols-[0.9fr_1.1fr] print:grid-cols-1">
           <Card title="Investment Allocation" subtitle="Current value distribution." className="min-w-0">
-            <div className="mt-4 h-[320px] min-w-0 w-full">
-              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={320}>
-                <PieChart>
+            <div className="mt-4 h-[320px] min-w-0 w-full min-h-[320px]">
+              {chartsReady && (
+                <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={1}>
+                  <PieChart>
                   <Pie data={allocationData} dataKey="value" cx="50%" cy="50%" innerRadius={70} outerRadius={100} paddingAngle={4}>
                     {allocationData.map((entry, index) => (
                       <Cell key={entry.name} fill={colors[index % colors.length]} />
@@ -285,8 +307,9 @@ export default function Dashboard({ data, setActiveTab }: { data: PortfolioData;
                     formatter={(value: number) => formatCurrency(value)}
                   />
                   <Legend verticalAlign="bottom" />
-                </PieChart>
-              </ResponsiveContainer>
+                  </PieChart>
+                </ResponsiveContainer>
+              )}
             </div>
           </Card>
 

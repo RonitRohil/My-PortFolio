@@ -1,8 +1,8 @@
 import React, { useMemo, useState } from "react";
-import { Building2, Edit2, Eye, Plus, Trash2 } from "lucide-react";
+import { Edit2, Eye, Plus, Trash2 } from "lucide-react";
 import { Badge, Button, Card, Input, Modal, Select } from "../components/UI";
 import { AccountType, BankAccount, PortfolioData } from "../types";
-import { formatCurrency, getAllAccounts, getRecentAccountTransactions, getAccountMonthlyStats, monthKey } from "../lib/utils";
+import { formatCurrency, getAllAccounts, getRecentAccountTransactions, getAccountMonthlyStats, monthKey, updateAccountBalance } from "../lib/utils";
 
 export default function BankAccounts({ data, updateData }: { data: PortfolioData; updateData: (d: Partial<PortfolioData>) => void }) {
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -13,6 +13,12 @@ export default function BankAccounts({ data, updateData }: { data: PortfolioData
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
+    if (editingAccount?.isCash) {
+      updateData(updateAccountBalance(data, editingAccount.id, Number(formData.get("balance"))));
+      setIsModalOpen(false);
+      setEditingAccount(null);
+      return;
+    }
     const account: BankAccount = {
       id: editingAccount?.id || `acc_${Date.now()}`,
       bankName: String(formData.get("bankName")),
@@ -60,12 +66,12 @@ export default function BankAccounts({ data, updateData }: { data: PortfolioData
                     </div>
                     <div className="mt-1 text-sm text-slate-500">{account.accountNumber ? `**** ${account.accountNumber}` : "No account number"}</div>
                   </div>
-                  {!account.isCash && (
-                    <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2">
                       <button onClick={() => { setEditingAccount(account); setIsModalOpen(true); }} className="p-2 text-slate-400 hover:text-emerald-500"><Edit2 className="h-4 w-4" /></button>
+                      {!account.isCash && (
                       <button onClick={() => updateData({ bankAccounts: accounts.filter((item) => item.id !== account.id) })} className="p-2 text-slate-400 hover:text-rose-500"><Trash2 className="h-4 w-4" /></button>
+                      )}
                     </div>
-                  )}
                 </div>
                 <div className={`text-4xl font-black ${account.balance >= 0 ? "text-emerald-400" : "text-rose-400"}`}>{formatCurrency(account.balance)}</div>
                 <div className="grid grid-cols-2 gap-4">
@@ -92,7 +98,7 @@ export default function BankAccounts({ data, updateData }: { data: PortfolioData
                           <div className="text-xs text-slate-500">{transaction.date}</div>
                         </div>
                         <div className={`font-bold ${transaction.kind === "income" ? "text-emerald-400" : transaction.kind === "expense" ? "text-rose-400" : "text-slate-200"}`}>
-                          {transaction.kind === "income" ? "+" : transaction.kind === "expense" ? "-" : "⇄"} {formatCurrency(transaction.amount)}
+                          {transaction.kind === "income" ? "+" : transaction.kind === "expense" ? "-" : "<->"} {formatCurrency(transaction.amount)}
                         </div>
                       </div>
                     ))}
@@ -111,13 +117,18 @@ export default function BankAccounts({ data, updateData }: { data: PortfolioData
 
       <Modal isOpen={isModalOpen} onClose={() => { setIsModalOpen(false); setEditingAccount(null); }} title={editingAccount ? "Edit Account" : "Add Account"}>
         <form onSubmit={handleSubmit} className="space-y-4">
-          <Input label="Account Name" name="bankName" required defaultValue={editingAccount?.bankName} />
-          <Select label="Account Type" name="accountType" defaultValue={editingAccount?.accountType || "Savings"}>
+          <Input label="Account Name" name="bankName" required defaultValue={editingAccount?.bankName} disabled={!!editingAccount?.isCash} />
+          <Select label="Account Type" name="accountType" defaultValue={editingAccount?.accountType || "Savings"} disabled={!!editingAccount?.isCash}>
             {["Savings", "Current", "Salary"].map((type) => <option key={type} value={type}>{type}</option>)}
           </Select>
-          <Input label="Account Number (Last 4 digits)" name="accountNumber" maxLength={4} defaultValue={editingAccount?.accountNumber} />
+          <Input label="Account Number (Last 4 digits)" name="accountNumber" maxLength={4} defaultValue={editingAccount?.accountNumber} disabled={!!editingAccount?.isCash} />
           <Input label="Current Balance" name="balance" type="number" required defaultValue={editingAccount?.balance} />
-          <Input label="Notes" name="notes" defaultValue={editingAccount?.notes} />
+          {!editingAccount?.isCash && <Input label="Notes" name="notes" defaultValue={editingAccount?.notes} />}
+          {editingAccount?.isCash && (
+            <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 px-4 py-3 text-sm text-amber-200">
+              Cash is a protected account. You can update its live balance here, but it cannot be deleted or renamed.
+            </div>
+          )}
           <div className="flex gap-3 pt-4">
             <Button type="submit" className="flex-1">{editingAccount ? "Update Account" : "Add Account"}</Button>
             <Button type="button" variant="secondary" onClick={() => setIsModalOpen(false)}>Cancel</Button>

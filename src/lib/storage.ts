@@ -1,6 +1,30 @@
-import { BankAccount, PortfolioData } from "../types";
+import { BankAccount, CategoryDefinition, PortfolioData } from "../types";
 
 const STORAGE_KEY = "myportfolio_data";
+
+const DEFAULT_INCOME_CATEGORIES: CategoryDefinition[] = [
+  { id: "income_salary", name: "Salary", parentId: null, type: "income" },
+  { id: "income_freelance", name: "Freelance", parentId: null, type: "income" },
+  { id: "income_dividends", name: "Dividends", parentId: null, type: "income" },
+  { id: "income_interest", name: "Interest", parentId: null, type: "income" },
+  { id: "income_rental", name: "Rental", parentId: null, type: "income" },
+  { id: "income_other", name: "Other", parentId: null, type: "income" },
+];
+
+const DEFAULT_EXPENSE_CATEGORIES: CategoryDefinition[] = [
+  { id: "expense_food", name: "Food", parentId: null, type: "expense" },
+  { id: "expense_rent", name: "Rent", parentId: null, type: "expense" },
+  { id: "expense_emi", name: "EMI", parentId: null, type: "expense" },
+  { id: "expense_utilities", name: "Utilities", parentId: null, type: "expense" },
+  { id: "expense_entertainment", name: "Entertainment", parentId: null, type: "expense" },
+  { id: "expense_medical", name: "Medical", parentId: null, type: "expense" },
+  { id: "expense_travel", name: "Travel", parentId: null, type: "expense" },
+  { id: "expense_investment", name: "Investment", parentId: null, type: "expense" },
+  { id: "expense_beauty", name: "Beauty", parentId: null, type: "expense" },
+  { id: "expense_social_life", name: "Social Life", parentId: null, type: "expense" },
+  { id: "expense_transport", name: "Transport", parentId: null, type: "expense" },
+  { id: "expense_other", name: "Other", parentId: null, type: "expense" },
+];
 
 export const CASH_ACCOUNT: BankAccount = {
   id: "acc_cash",
@@ -28,8 +52,32 @@ const INITIAL_DATA: PortfolioData = {
   settings: {
     monthlyBudget: 50000,
     yearView: "calendar",
+    incomeCategories: DEFAULT_INCOME_CATEGORIES,
+    expenseCategories: DEFAULT_EXPENSE_CATEGORIES,
   },
 };
+
+function normalizeCategoryDefinitions(categories: any[] | undefined, fallback: CategoryDefinition[]) {
+  if (!Array.isArray(categories) || categories.length === 0) return fallback;
+  const seen = new Set<string>();
+  const normalized = categories
+    .filter(Boolean)
+    .map((category) => ({
+      id: String(category.id || `${category.type || "category"}_${String(category.name || "").toLowerCase().replace(/\s+/g, "_")}`),
+      name: String(category.name || "").trim(),
+      parentId: category.parentId ? String(category.parentId) : null,
+      parentName: category.parentName ? String(category.parentName) : null,
+      type: category.type === "income" ? "income" : "expense",
+    }))
+    .filter((category) => category.name)
+    .filter((category) => {
+      const key = `${category.type}:${category.name.toLowerCase()}:${category.parentId || ""}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  return normalized.length > 0 ? normalized : fallback;
+}
 
 function ensureCashAccount(accounts: BankAccount[] = []) {
   const withoutCash = accounts.filter((account) => account.id !== CASH_ACCOUNT.id);
@@ -84,6 +132,8 @@ export const loadData = (): PortfolioData => {
         settings: {
           ...INITIAL_DATA.settings,
           ...data.settings,
+          incomeCategories: normalizeCategoryDefinitions(data.settings?.incomeCategories, DEFAULT_INCOME_CATEGORIES),
+          expenseCategories: normalizeCategoryDefinitions(data.settings?.expenseCategories, DEFAULT_EXPENSE_CATEGORIES),
         },
       };
     }

@@ -1,9 +1,18 @@
 import { GoogleGenAI } from "@google/genai";
 import { PortfolioData } from "../types";
 
-const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
+const apiKey = process.env.GEMINI_API_KEY || "";
+const genAI = apiKey ? new GoogleGenAI({ apiKey }) : null;
+let warnedNoKey = false;
 
 export async function analyzePortfolio(data: PortfolioData) {
+  if (!genAI) {
+    if (!warnedNoKey) {
+      console.warn("Gemini API key is not set. Using fallback insights.");
+      warnedNoKey = true;
+    }
+    return ["Build an emergency fund.", "Diversify your portfolio.", "Review high-interest debt."];
+  }
   const prompt = `
     Analyze this personal finance portfolio and provide 3 concise, actionable insights for improvement.
     The user is in India (INR).

@@ -74,7 +74,7 @@ export interface RecurringDeposit {
   maturityDate: string;
 }
 
-export type IncomeSource = "Salary" | "Freelance" | "Dividends" | "Interest" | "Rental" | "Other";
+export type IncomeSource = string;
 
 export interface IncomeEntry {
   id: string;
@@ -86,19 +86,7 @@ export interface IncomeEntry {
   toAccountName: string | null;
 }
 
-export type ExpenseCategory =
-  | "Food"
-  | "Rent"
-  | "EMI"
-  | "Utilities"
-  | "Entertainment"
-  | "Medical"
-  | "Travel"
-  | "Investment"
-  | "Beauty"
-  | "Social Life"
-  | "Transport"
-  | "Other";
+export type ExpenseCategory = string;
 
 export type PaymentMethod = "Cash" | "UPI" | "Card" | "Net Banking" | "NEFT/IMPS" | "Cheque";
 
@@ -178,6 +166,14 @@ export interface RecurringRule {
 
 export type YearViewMode = "calendar" | "financial";
 
+export interface CategoryDefinition {
+  id: string;
+  name: string;
+  parentId: string | null;
+  parentName?: string | null;
+  type: "income" | "expense";
+}
+
 export interface PortfolioData {
   bankAccounts: BankAccount[];
   transfers: TransferEntry[];
@@ -194,5 +190,7 @@ export interface PortfolioData {
   settings: {
     monthlyBudget: number;
     yearView: YearViewMode;
+    incomeCategories: CategoryDefinition[];
+    expenseCategories: CategoryDefinition[];
   };
 }

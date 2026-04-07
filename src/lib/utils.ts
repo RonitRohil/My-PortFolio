@@ -2,6 +2,7 @@ import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 import {
   BankAccount,
+  CategoryDefinition,
   ExpenseCategory,
   ExpenseEntry,
   IncomeEntry,
@@ -152,7 +153,10 @@ export const parseCSV = (csv: string) => {
   );
 };
 
-export const getAllAccounts = (data: PortfolioData) => [CASH_ACCOUNT, ...data.bankAccounts.filter((account) => account.id !== CASH_ACCOUNT.id)];
+export const getAllAccounts = (data: PortfolioData) => {
+  const storedCashAccount = data.bankAccounts.find((account) => account.id === CASH_ACCOUNT.id);
+  return [{ ...CASH_ACCOUNT, ...(storedCashAccount || {}) }, ...data.bankAccounts.filter((account) => account.id !== CASH_ACCOUNT.id)];
+};
 
 export const getAccountNameById = (data: PortfolioData, accountId: string | null) =>
   getAllAccounts(data).find((account) => account.id === accountId)?.bankName || null;
@@ -161,20 +165,75 @@ export const isCashAccount = (accountId: string | null) => accountId === CASH_AC
 
 export const getExpenseMethods = (): PaymentMethod[] => ["Cash", "UPI", "Card", "Net Banking", "NEFT/IMPS", "Cheque"];
 
-export const getExpenseCategories = (): ExpenseCategory[] => [
-  "Food",
-  "Rent",
-  "EMI",
-  "Utilities",
-  "Entertainment",
-  "Medical",
-  "Travel",
-  "Investment",
-  "Beauty",
-  "Social Life",
-  "Transport",
-  "Other",
-];
+export const getCategoryDisplayPath = (category: CategoryDefinition, allCategories: CategoryDefinition[]) => {
+  if (!category.parentId) return category.name;
+  const parent = allCategories.find((item) => item.id === category.parentId);
+  return parent ? `${parent.name} / ${category.name}` : category.name;
+};
+
+export const getExpenseCategories = (data?: PortfolioData): ExpenseCategory[] =>
+  data?.settings?.expenseCategories?.map((category) => getCategoryDisplayPath(category, data.settings.expenseCategories)) || [
+    "Food",
+    "Rent",
+    "EMI",
+    "Utilities",
+    "Entertainment",
+    "Medical",
+    "Travel",
+    "Investment",
+    "Beauty",
+    "Social Life",
+    "Transport",
+    "Other",
+  ];
+
+export const getIncomeSources = (data?: PortfolioData): string[] =>
+  data?.settings?.incomeCategories?.map((category) => getCategoryDisplayPath(category, data.settings.incomeCategories)) || [
+    "Salary",
+    "Freelance",
+    "Dividends",
+    "Interest",
+    "Rental",
+    "Other",
+  ];
+
+export const updateAccountBalance = (data: PortfolioData, accountId: string, nextBalance: number) =>
+  recalculateAccountNames({
+    ...data,
+    bankAccounts: getAllAccounts(data).map((account) =>
+      account.id === accountId ? { ...account, balance: nextBalance } : account,
+    ),
+  });
+
+export const getCategoryBreakdown = (
+  items: Array<{ amount: number; category?: string; source?: string }>,
+  key: "category" | "source",
+) =>
+  Array.from(
+    items.reduce((map, item) => {
+      const label = String(item[key] || "Other");
+      map.set(label, (map.get(label) || 0) + item.amount);
+      return map;
+    }, new Map<string, number>()),
+  )
+    .sort((a, b) => b[1] - a[1]);
+
+export const mergeImportedCategories = (
+  existing: CategoryDefinition[],
+  imported: CategoryDefinition[],
+) => {
+  const merged = [...existing];
+  imported.forEach((category) => {
+    const exists = merged.some(
+      (item) =>
+        item.type === category.type &&
+        item.name.toLowerCase() === category.name.toLowerCase() &&
+        (item.parentName || "").toLowerCase() === (category.parentName || "").toLowerCase(),
+    );
+    if (!exists) merged.push(category);
+  });
+  return merged;
+};
 
 export const getMutualFundInvestedAmount = (fund: MutualFund) =>
   getComputedSipInvested(fund.sipDetails) + fund.lumpsumEntries.reduce((sum, entry) => sum + entry.amount, 0);
@@ -345,6 +404,7 @@ export const countUnlinkedTransactions = (data: PortfolioData) =>
 export const getUnlinkedEntries = (data: PortfolioData) => ({
   income: data.income.filter((entry) => !entry.toAccountId),
   expenses: data.expenses.filter((entry) => !entry.fromAccountId),
+  recurringRules: data.recurringRules.filter((rule) => !rule.fromAccountId),
 });
 
 export const getAccountMonthlyStats = (data: PortfolioData, accountId: string, year: number, month: number) => {
@@ -479,10 +539,38 @@ export const searchPortfolio = (data: PortfolioData, query: string) => {
   const term = query.trim().toLowerCase();
   if (term.length < 3) return [];
   return [
-    ...data.expenses.filter((entry) => entry.description?.toLowerCase().includes(term) || entry.category.toLowerCase().includes(term)).map((entry) => ({ id: `expense-${entry.id}`, label: entry.description || entry.category, sublabel: `${entry.category} • ${entry.fromAccountName || "Account?"} • ${formatCurrency(entry.amount)} • ${formatDate(entry.date)}`, tab: "expenses", kind: "expense" as const })),
-    ...data.income.filter((entry) => entry.description?.toLowerCase().includes(term) || entry.source.toLowerCase().includes(term)).map((entry) => ({ id: `income-${entry.id}`, label: entry.description || entry.source, sublabel: `${entry.source} • ${entry.toAccountName || "Account?"} • ${formatCurrency(entry.amount)} • ${formatDate(entry.date)}`, tab: "income", kind: "income" as const })),
-    ...data.investments.mutualFunds.filter((fund) => fund.fundName.toLowerCase().includes(term)).map((fund) => ({ id: `mf-${fund.id}`, label: fund.fundName, sublabel: "Mutual Fund", tab: "investments", kind: "investment" as const })),
-    ...data.investments.stockPortfolios.flatMap((portfolio) => portfolio.holdings.filter((holding) => normalizeStockName(holding.companyName).toLowerCase().includes(term) || holding.ticker.toLowerCase().includes(term)).map((holding) => ({ id: `stock-${holding.id}`, label: normalizeStockName(holding.companyName), sublabel: `${portfolio.name} • ${holding.ticker}`, tab: "investments", kind: "investment" as const }))),
+    ...data.expenses
+      .filter((entry) => entry.description?.toLowerCase().includes(term) || entry.category.toLowerCase().includes(term))
+      .map((entry) => ({
+        id: `expense-${entry.id}`,
+        label: entry.description || entry.category,
+        sublabel: `${entry.category} - ${entry.fromAccountName || "Account?"} - ${formatCurrency(entry.amount)} - ${formatDate(entry.date)}`,
+        tab: "transactions",
+        kind: "expense" as const,
+      })),
+    ...data.income
+      .filter((entry) => entry.description?.toLowerCase().includes(term) || entry.source.toLowerCase().includes(term))
+      .map((entry) => ({
+        id: `income-${entry.id}`,
+        label: entry.description || entry.source,
+        sublabel: `${entry.source} - ${entry.toAccountName || "Account?"} - ${formatCurrency(entry.amount)} - ${formatDate(entry.date)}`,
+        tab: "transactions",
+        kind: "income" as const,
+      })),
+    ...data.investments.mutualFunds
+      .filter((fund) => fund.fundName.toLowerCase().includes(term))
+      .map((fund) => ({ id: `mf-${fund.id}`, label: fund.fundName, sublabel: "Mutual Fund", tab: "investments", kind: "investment" as const })),
+    ...data.investments.stockPortfolios.flatMap((portfolio) =>
+      portfolio.holdings
+        .filter((holding) => normalizeStockName(holding.companyName).toLowerCase().includes(term) || holding.ticker.toLowerCase().includes(term))
+        .map((holding) => ({
+          id: `stock-${holding.id}`,
+          label: normalizeStockName(holding.companyName),
+          sublabel: `${portfolio.name} - ${holding.ticker}`,
+          tab: "investments",
+          kind: "investment" as const,
+        })),
+    ),
   ].slice(0, 12);
 };
 

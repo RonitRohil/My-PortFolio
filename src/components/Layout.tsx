@@ -27,8 +27,7 @@ const navItems = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { id: "bank", label: "Bank Accounts", icon: Building2 },
   { id: "investments", label: "Investments", icon: TrendingUp },
-  { id: "income", label: "Income", icon: ArrowUpCircle },
-  { id: "expenses", label: "Expenses", icon: ArrowDownCircle },
+  { id: "transactions", label: "Transactions", icon: ArrowDownCircle },
   { id: "loans", label: "Loans & EMI", icon: CreditCard },
   { id: "settings", label: "Data Management", icon: Settings },
 ];
@@ -43,6 +42,7 @@ export default function Layout({ children, activeTab, setActiveTab, data }: Layo
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const results = useMemo(() => searchPortfolio(data, searchQuery), [data, searchQuery]);
+  const logoSrc = `${import.meta.env.BASE_URL}favicon.svg`;
 
   const searchBox = (
     <div className="relative w-full max-w-xl">
@@ -89,9 +89,9 @@ export default function Layout({ children, activeTab, setActiveTab, data }: Layo
     <div className="min-h-screen bg-slate-950 text-slate-100 md:flex">
       <aside className="hidden h-screen w-64 flex-col border-r border-slate-800 bg-slate-900 print:hidden md:flex">
         <div className="p-6">
-          <h1 className="flex items-center gap-2 text-2xl font-bold text-emerald-500">
-            <TrendingUp className="h-8 w-8" />
-            My Portfolio
+          <h1 className="flex items-center gap-3 text-2xl font-bold text-emerald-500">
+            <img src={logoSrc} alt="My Portfolio logo" className="h-9 w-9 rounded-xl bg-slate-900 p-1.5 shadow-lg shadow-emerald-500/20" />
+            <span>My Portfolio</span>
           </h1>
         </div>
         <nav className="flex-1 space-y-2 px-4 py-4">
@@ -112,7 +112,7 @@ export default function Layout({ children, activeTab, setActiveTab, data }: Layo
           ))}
         </nav>
         <div className="border-t border-slate-800 p-4 text-center text-xs text-slate-500">
-          © 2026 My Portfolio
+          (c) 2026 My Portfolio
         </div>
       </aside>
 
@@ -120,8 +120,8 @@ export default function Layout({ children, activeTab, setActiveTab, data }: Layo
         <header className="sticky top-0 z-40 border-b border-slate-800 bg-slate-950/90 backdrop-blur print:hidden">
           <div className="flex items-center justify-between gap-4 px-4 py-4 md:hidden">
             <h1 className="flex items-center gap-2 text-xl font-bold text-emerald-500">
-              <TrendingUp className="h-6 w-6" />
-              My Portfolio
+              <img src={logoSrc} alt="My Portfolio logo" className="h-7 w-7 rounded-lg bg-slate-900 p-1 shadow-lg shadow-emerald-500/20" />
+              <span>My Portfolio</span>
             </h1>
             <button onClick={() => setIsMobileMenuOpen((value) => !value)} className="p-2 text-slate-400 hover:text-white">
               {isMobileMenuOpen ? <X /> : <Menu />}
