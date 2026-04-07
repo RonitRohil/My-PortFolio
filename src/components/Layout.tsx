@@ -1,22 +1,26 @@
-import React, { useState, useEffect } from "react";
-import { 
-  LayoutDashboard, 
-  Building2, 
-  TrendingUp, 
-  ArrowUpCircle, 
-  ArrowDownCircle, 
-  CreditCard, 
-  Settings,
+import React, { useMemo, useState } from "react";
+import {
+  ArrowDownCircle,
+  ArrowUpCircle,
+  Building2,
+  CreditCard,
+  LayoutDashboard,
   Menu,
-  X
+  Search,
+  Settings,
+  TrendingUp,
+  Wallet,
+  X,
 } from "lucide-react";
-import { cn } from "../lib/utils";
 import { motion, AnimatePresence } from "motion/react";
+import { PortfolioData } from "../types";
+import { cn, searchPortfolio } from "../lib/utils";
 
 interface LayoutProps {
   children: React.ReactNode;
   activeTab: string;
   setActiveTab: (tab: string) => void;
+  data: PortfolioData;
 }
 
 const navItems = [
@@ -29,109 +33,152 @@ const navItems = [
   { id: "settings", label: "Data Management", icon: Settings },
 ];
 
-export default function Layout({ children, activeTab, setActiveTab }: LayoutProps) {
+const resultIcons = {
+  expense: Wallet,
+  income: ArrowUpCircle,
+  investment: TrendingUp,
+};
+
+export default function Layout({ children, activeTab, setActiveTab, data }: LayoutProps) {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const results = useMemo(() => searchPortfolio(data, searchQuery), [data, searchQuery]);
+
+  const searchBox = (
+    <div className="relative w-full max-w-xl">
+      <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+      <input
+        value={searchQuery}
+        onChange={(event) => setSearchQuery(event.target.value)}
+        placeholder="Search transactions, income, and investments..."
+        className="w-full rounded-2xl border border-slate-800 bg-slate-900/80 py-3 pl-11 pr-4 text-sm text-slate-100 outline-none transition focus:border-emerald-500"
+      />
+      {searchQuery.trim().length >= 3 && (
+        <div className="absolute left-0 right-0 top-[calc(100%+8px)] z-50 overflow-hidden rounded-2xl border border-slate-800 bg-slate-900 shadow-2xl">
+          {results.length > 0 ? (
+            results.map((result) => {
+              const Icon = resultIcons[result.kind];
+              return (
+                <button
+                  key={result.id}
+                  onClick={() => {
+                    setActiveTab(result.tab);
+                    setSearchQuery("");
+                  }}
+                  className="flex w-full items-center gap-3 border-b border-slate-800 px-4 py-3 text-left transition hover:bg-slate-800/70"
+                >
+                  <span className="rounded-xl bg-slate-800 p-2 text-emerald-400">
+                    <Icon className="h-4 w-4" />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block truncate text-sm font-semibold text-slate-100">{result.label}</span>
+                    <span className="block truncate text-xs text-slate-400">{result.sublabel}</span>
+                  </span>
+                </button>
+              );
+            })
+          ) : (
+            <div className="px-4 py-3 text-sm text-slate-400">No matches found.</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col md:flex-row">
-      {/* Desktop Sidebar */}
-      <aside className="hidden md:flex flex-col w-64 bg-slate-900 border-r border-slate-800 sticky top-0 h-screen">
+    <div className="min-h-screen bg-slate-950 text-slate-100 md:flex">
+      <aside className="hidden h-screen w-64 flex-col border-r border-slate-800 bg-slate-900 print:hidden md:flex">
         <div className="p-6">
-          <h1 className="text-2xl font-bold text-emerald-500 flex items-center gap-2">
-            <TrendingUp className="w-8 h-8" />
+          <h1 className="flex items-center gap-2 text-2xl font-bold text-emerald-500">
+            <TrendingUp className="h-8 w-8" />
             My Portfolio
           </h1>
         </div>
-        <nav className="flex-1 px-4 space-y-2 py-4">
+        <nav className="flex-1 space-y-2 px-4 py-4">
           {navItems.map((item) => (
             <button
               key={item.id}
               onClick={() => setActiveTab(item.id)}
               className={cn(
-                "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200",
-                activeTab === item.id 
-                  ? "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20" 
-                  : "text-slate-400 hover:bg-slate-800 hover:text-slate-200"
+                "flex w-full items-center gap-3 rounded-xl px-4 py-3 transition-all duration-200",
+                activeTab === item.id
+                  ? "border border-emerald-500/20 bg-emerald-500/10 text-emerald-500"
+                  : "text-slate-400 hover:bg-slate-800 hover:text-slate-200",
               )}
             >
-              <item.icon className="w-5 h-5" />
+              <item.icon className="h-5 w-5" />
               <span className="font-medium">{item.label}</span>
             </button>
           ))}
         </nav>
-        <div className="p-4 border-t border-slate-800">
-          <p className="text-xs text-slate-500 text-center">© 2026 My Portfolio</p>
+        <div className="border-t border-slate-800 p-4 text-center text-xs text-slate-500">
+          © 2026 My Portfolio
         </div>
       </aside>
 
-      {/* Mobile Header */}
-      <header className="md:hidden flex items-center justify-between p-4 bg-slate-900 border-b border-slate-800 sticky top-0 z-50">
-        <h1 className="text-xl font-bold text-emerald-500 flex items-center gap-2">
-          <TrendingUp className="w-6 h-6" />
-          My Portfolio
-        </h1>
-        <button 
-          onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-          className="p-2 text-slate-400 hover:text-white"
-        >
-          {isMobileMenuOpen ? <X /> : <Menu />}
-        </button>
-      </header>
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className="sticky top-0 z-40 border-b border-slate-800 bg-slate-950/90 backdrop-blur print:hidden">
+          <div className="flex items-center justify-between gap-4 px-4 py-4 md:hidden">
+            <h1 className="flex items-center gap-2 text-xl font-bold text-emerald-500">
+              <TrendingUp className="h-6 w-6" />
+              My Portfolio
+            </h1>
+            <button onClick={() => setIsMobileMenuOpen((value) => !value)} className="p-2 text-slate-400 hover:text-white">
+              {isMobileMenuOpen ? <X /> : <Menu />}
+            </button>
+          </div>
+          <div className="hidden px-6 py-4 md:block">{searchBox}</div>
+          <div className="px-4 pb-4 md:hidden">{searchBox}</div>
+        </header>
 
-      {/* Mobile Menu Overlay */}
-      <AnimatePresence>
-        {isMobileMenuOpen && (
-          <motion.div
-            initial={{ opacity: 0, y: -20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -20 }}
-            className="md:hidden fixed inset-0 z-40 bg-slate-950 pt-20"
-          >
-            <nav className="px-6 space-y-4">
-              {navItems.map((item) => (
-                <button
-                  key={item.id}
-                  onClick={() => {
-                    setActiveTab(item.id);
-                    setIsMobileMenuOpen(false);
-                  }}
-                  className={cn(
-                    "w-full flex items-center gap-4 px-6 py-4 rounded-2xl text-lg transition-all",
-                    activeTab === item.id 
-                      ? "bg-emerald-500 text-white shadow-lg shadow-emerald-500/20" 
-                      : "text-slate-400 bg-slate-900"
-                  )}
-                >
-                  <item.icon className="w-6 h-6" />
-                  <span className="font-semibold">{item.label}</span>
-                </button>
-              ))}
-            </nav>
-          </motion.div>
-        )}
-      </AnimatePresence>
+        <AnimatePresence>
+          {isMobileMenuOpen && (
+            <motion.div
+              initial={{ opacity: 0, y: -20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              className="fixed inset-0 z-30 bg-slate-950 pt-32 md:hidden"
+            >
+              <nav className="space-y-4 px-6">
+                {navItems.map((item) => (
+                  <button
+                    key={item.id}
+                    onClick={() => {
+                      setActiveTab(item.id);
+                      setIsMobileMenuOpen(false);
+                    }}
+                    className={cn(
+                      "flex w-full items-center gap-4 rounded-2xl px-6 py-4 text-lg transition-all",
+                      activeTab === item.id ? "bg-emerald-500 text-white" : "bg-slate-900 text-slate-400",
+                    )}
+                  >
+                    <item.icon className="h-6 w-6" />
+                    <span className="font-semibold">{item.label}</span>
+                  </button>
+                ))}
+              </nav>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
-      {/* Main Content */}
-      <main className="flex-1 p-4 md:p-8 lg:p-10 max-w-7xl mx-auto w-full">
-        {children}
-      </main>
+        <main className="mx-auto w-full max-w-7xl flex-1 p-4 md:p-8 lg:p-10">{children}</main>
 
-      {/* Mobile Bottom Tab Bar (Optional but requested) */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-slate-900/80 backdrop-blur-lg border-t border-slate-800 flex justify-around items-center p-2 z-50">
-        {navItems.slice(0, 5).map((item) => (
-          <button
-            key={item.id}
-            onClick={() => setActiveTab(item.id)}
-            className={cn(
-              "flex flex-col items-center gap-1 p-2 rounded-lg transition-colors",
-              activeTab === item.id ? "text-emerald-500" : "text-slate-500"
-            )}
-          >
-            <item.icon className="w-5 h-5" />
-            <span className="text-[10px] font-medium">{item.label.split(' ')[0]}</span>
-          </button>
-        ))}
-      </nav>
+        <nav className="fixed bottom-0 left-0 right-0 z-50 flex items-center justify-around border-t border-slate-800 bg-slate-900/85 p-2 backdrop-blur-lg print:hidden md:hidden">
+          {navItems.slice(0, 5).map((item) => (
+            <button
+              key={item.id}
+              onClick={() => setActiveTab(item.id)}
+              className={cn(
+                "flex flex-col items-center gap-1 rounded-lg p-2 transition-colors",
+                activeTab === item.id ? "text-emerald-500" : "text-slate-500",
+              )}
+            >
+              <item.icon className="h-5 w-5" />
+              <span className="text-[10px] font-medium">{item.label.split(" ")[0]}</span>
+            </button>
+          ))}
+        </nav>
+      </div>
     </div>
   );
 }

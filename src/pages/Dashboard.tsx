@@ -1,104 +1,97 @@
-import React, { useState, useEffect } from "react";
-import { PortfolioData, StockPortfolio, Stock } from "../types";
-import { Card, Badge, Table } from "../components/UI";
-import { 
-  formatCurrency, 
-  calculateSIPInvested, 
-  calculateRDInvested, 
-  calculateRDValue, 
-  calculateFDValue 
+import React, { useState } from "react";
+import { PortfolioData } from "../types";
+import { Badge, Button, Card, Table } from "../components/UI";
+import {
+  calculateFDValue,
+  calculateRDInvested,
+  calculateRDValue,
+  cn,
+  formatCurrency,
+  getCombinedStockHoldings,
+  getComputedSipInvested,
+  getMonthlyCashflowSeries,
+  getNeedsAttention,
+  getNetWorthTrend,
+  getPrintSummary,
+  getYearLabel,
+  getMutualFundInvestedAmount,
+  countUnlinkedTransactions,
+  filterByMonth,
 } from "../lib/utils";
-import { 
-  TrendingUp, 
-  TrendingDown, 
-  Wallet, 
-  PieChart as PieChartIcon, 
-  BarChart3,
-  Sparkles,
-  CreditCard
-} from "lucide-react";
-import { cn } from "../lib/utils";
-import { 
-  BarChart, 
-  Bar, 
-  XAxis, 
-  YAxis, 
-  CartesianGrid, 
-  Tooltip, 
-  ResponsiveContainer,
-  PieChart,
-  Pie,
+import {
+  Area,
+  AreaChart,
+  Bar,
+  BarChart,
+  CartesianGrid,
   Cell,
-  Legend
+  Legend,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
 } from "recharts";
+import {
+  AlertTriangle,
+  BarChart3,
+  CreditCard,
+  Sparkles,
+  TrendingDown,
+  TrendingUp,
+  Wallet,
+} from "lucide-react";
 import { analyzePortfolio } from "../services/geminiService";
 
-export default function Dashboard({ data }: { data: PortfolioData }) {
+export default function Dashboard({ data, setActiveTab }: { data: PortfolioData; setActiveTab: (tab: string) => void }) {
   const [insights, setInsights] = useState<string[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
 
-  const bankBalance = data.bankAccounts.reduce((sum, a) => sum + a.balance, 0);
-  
-  const mfInvested = data.investments.mutualFunds.reduce((sum, mf) => {
-    const sipInv = mf.sipDetails ? calculateSIPInvested(mf.sipDetails.monthlyAmount, mf.sipDetails.startDate) : 0;
-    const lumpInv = mf.lumpsumEntries.reduce((s, l) => s + l.amount, 0);
-    return sum + sipInv + lumpInv;
-  }, 0);
-  
-  const stockInvested = data.investments.stockPortfolios.reduce((sum, p) => 
-    sum + p.holdings.reduce((s, h) => s + (h.quantity * h.avgBuyPrice), 0), 0
+  const bankBalance = data.bankAccounts.reduce((sum, account) => sum + account.balance, 0);
+  const mfInvested = data.investments.mutualFunds.reduce((sum, fund) => sum + getMutualFundInvestedAmount(fund), 0);
+  const mfCurrent = data.investments.mutualFunds.reduce((sum, fund) => sum + fund.currentValue, 0);
+  const stockHoldings = getCombinedStockHoldings(data);
+  const stockInvested = stockHoldings.reduce((sum, item) => sum + item.totalInvested, 0);
+  const stockCurrent = stockHoldings.reduce((sum, item) => sum + item.totalCurrentValue, 0);
+  const fdInvested = data.investments.fd.reduce((sum, fd) => sum + fd.principal, 0);
+  const fdCurrent = data.investments.fd.reduce(
+    (sum, fd) => sum + calculateFDValue(fd.principal, fd.interestRate, fd.startDate, fd.maturityDate),
+    0,
   );
-  
-  const fdInvested = data.investments.fd.reduce((sum, f) => sum + f.principal, 0);
-  const rdInvested = data.investments.rd.reduce((sum, r) => 
-    sum + calculateRDInvested(r.monthlyDeposit, r.startDate, r.maturityDate), 0
+  const rdInvested = data.investments.rd.reduce(
+    (sum, rd) => sum + calculateRDInvested(rd.monthlyDeposit, rd.startDate, rd.maturityDate),
+    0,
   );
-
+  const rdCurrent = data.investments.rd.reduce(
+    (sum, rd) => sum + calculateRDValue(rd.monthlyDeposit, rd.interestRate, rd.startDate, rd.maturityDate),
+    0,
+  );
   const totalInvested = mfInvested + stockInvested + fdInvested + rdInvested;
-
-  const mfCurrent = data.investments.mutualFunds.reduce((sum, m) => sum + m.currentValue, 0);
-  
-  const stockCurrent = data.investments.stockPortfolios.reduce((sum, p) => 
-    sum + p.holdings.reduce((s, h) => s + (h.quantity * h.currentPrice), 0), 0
-  );
-
-  const fdCurrent = data.investments.fd.reduce((sum, f) => 
-    sum + calculateFDValue(f.principal, f.interestRate, f.startDate, f.maturityDate), 0
-  );
-  const rdCurrent = data.investments.rd.reduce((sum, r) => 
-    sum + calculateRDValue(r.monthlyDeposit, r.interestRate, r.startDate, r.maturityDate), 0
-  );
-
   const totalCurrent = mfCurrent + stockCurrent + fdCurrent + rdCurrent;
+  const totalLoans = data.loans.reduce((sum, loan) => sum + loan.outstandingBalance, 0);
+  const netWorth = bankBalance + totalCurrent - totalLoans;
   const totalPnL = totalCurrent - totalInvested;
   const pnlPercentage = totalInvested > 0 ? (totalPnL / totalInvested) * 100 : 0;
-
-  const mfPnL = mfCurrent - mfInvested;
-  const mfPnLPerc = mfInvested > 0 ? (mfPnL / mfInvested) * 100 : 0;
-  const stockPnL = stockCurrent - stockInvested;
-  const stockPnLPerc = stockInvested > 0 ? (stockPnL / stockInvested) * 100 : 0;
-
-  const totalLoans = data.loans.reduce((sum, l) => sum + l.outstandingBalance, 0);
-  const netWorth = (bankBalance + totalCurrent) - totalLoans;
+  const cashflowData = getMonthlyCashflowSeries(data, 6, data.settings.yearView);
+  const netWorthTrend = getNetWorthTrend(data, 12);
+  const attentionItems = getNeedsAttention(data);
+  const summary = getPrintSummary(data);
+  const periodLabel = getYearLabel(data.settings.yearView);
+  const now = new Date();
+  const monthIncome = filterByMonth(data.income, now.getFullYear(), now.getMonth()).reduce((sum, entry) => sum + entry.amount, 0);
+  const monthExpense = filterByMonth(data.expenses, now.getFullYear(), now.getMonth()).reduce((sum, entry) => sum + entry.amount, 0);
+  const monthTransfers = filterByMonth(data.transfers, now.getFullYear(), now.getMonth());
+  const unlinkedCount = countUnlinkedTransactions(data);
 
   const allocationData = [
     { name: "Mutual Funds", value: mfCurrent },
     { name: "Stocks", value: stockCurrent },
     { name: "FD", value: fdCurrent },
     { name: "RD", value: rdCurrent },
-  ].filter(d => d.value > 0);
+  ].filter((item) => item.value > 0);
 
-  const COLORS = ["#10b981", "#3b82f6", "#f59e0b", "#8b5cf6", "#ec4899"];
-
-  // Mock chart data for income vs expense
-  const chartData = [
-    { month: "Nov", income: 85000, expense: 45000 },
-    { month: "Dec", income: 90000, expense: 52000 },
-    { month: "Jan", income: 88000, expense: 48000 },
-    { month: "Feb", income: 92000, expense: 55000 },
-    { month: "Mar", income: 95000, expense: 50000 },
-    { month: "Apr", income: 100000, expense: 42000 },
-  ];
+  const colors = ["#10b981", "#3b82f6", "#f59e0b", "#ef4444"];
 
   const handleAnalyze = async () => {
     setIsAnalyzing(true);
@@ -108,279 +101,311 @@ export default function Dashboard({ data }: { data: PortfolioData }) {
   };
 
   return (
-    <div className="space-y-8">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+    <div className="space-y-8 print:space-y-4">
+      <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center print:hidden">
         <div>
           <h2 className="text-3xl font-bold text-slate-100">Financial Overview</h2>
-          <p className="text-slate-400">Welcome back! Here's how your portfolio is performing.</p>
+          <p className="text-slate-400">Tracking summary for {periodLabel}.</p>
         </div>
-        <button 
+        <button
           onClick={handleAnalyze}
           disabled={isAnalyzing}
-          className="flex items-center gap-2 px-4 py-2 bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 rounded-xl hover:bg-emerald-500/20 transition-all disabled:opacity-50"
+          className="inline-flex items-center gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-2 text-emerald-500 transition disabled:opacity-50"
         >
-          <Sparkles className={cn("w-5 h-5", isAnalyzing && "animate-spin")} />
+          <Sparkles className={cn("h-5 w-5", isAnalyzing && "animate-spin")} />
           {isAnalyzing ? "Analyzing..." : "AI Insights"}
         </button>
       </div>
 
       {insights.length > 0 && (
-        <Card className="bg-emerald-500/5 border-emerald-500/20">
-          <div className="flex items-start gap-4">
-            <div className="p-2 bg-emerald-500/20 rounded-lg">
-              <Sparkles className="w-6 h-6 text-emerald-500" />
-            </div>
-            <div className="space-y-2">
-              <h4 className="font-bold text-emerald-500">Gemini Insights</h4>
-              <ul className="list-disc list-inside text-sm text-slate-300 space-y-1">
-                {insights.map((insight, i) => <li key={i}>{insight}</li>)}
-              </ul>
-            </div>
+        <Card className="border-emerald-500/20 bg-emerald-500/5 print:hidden">
+          <div className="space-y-2">
+            <h4 className="font-bold text-emerald-400">Portfolio Insights</h4>
+            <ul className="list-disc space-y-1 pl-4 text-sm text-slate-300">
+              {insights.map((insight, index) => (
+                <li key={index}>{insight}</li>
+              ))}
+            </ul>
           </div>
         </Card>
       )}
 
-      {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <Card className="border-l-4 border-l-emerald-500 bg-emerald-500/5 shadow-[0_0_20px_rgba(16,185,129,0.05)]">
-          <p className="text-sm font-medium text-slate-400">Net Worth</p>
-          <h3 className="text-2xl font-bold mt-1 text-emerald-50">{formatCurrency(netWorth)}</h3>
-          <div className="flex items-center gap-1 mt-2 text-emerald-500 text-xs font-bold">
-            <TrendingUp className="w-3 h-3" />
-            Assets - Liabilities
-          </div>
-        </Card>
-
-        <Card className="border-l-4 border-l-blue-500">
-          <p className="text-sm font-medium text-slate-400">Total Invested</p>
-          <h3 className="text-2xl font-bold mt-1">{formatCurrency(totalInvested)}</h3>
-          <p className="text-xs text-slate-500 mt-2">Principal Amount</p>
-        </Card>
-
-        <Card className="border-l-4 border-l-amber-500">
-          <p className="text-sm font-medium text-slate-400">Current Value</p>
-          <h3 className="text-2xl font-bold mt-1">{formatCurrency(totalCurrent)}</h3>
-          <div className={cn(
-            "flex items-center gap-1 mt-2 text-xs font-bold",
-            totalPnL >= 0 ? "text-emerald-500" : "text-rose-500"
-          )}>
-            {totalPnL >= 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
-            {formatCurrency(Math.abs(totalPnL))} ({pnlPercentage.toFixed(2)}%)
-          </div>
-        </Card>
-
-        <Card className="border-l-4 border-l-rose-500">
-          <p className="text-sm font-medium text-slate-400">Total Debt</p>
-          <h3 className="text-2xl font-bold mt-1">{formatCurrency(totalLoans)}</h3>
-          <p className="text-xs text-slate-500 mt-2">Outstanding Loans</p>
-        </Card>
-      </div>
-
-      {/* Investment Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <Card title="Mutual Funds Summary" subtitle="Consolidated MF performance">
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <p className="text-xs text-slate-500 font-bold uppercase">Invested</p>
-                <p className="text-lg font-bold text-slate-200">{formatCurrency(mfInvested)}</p>
-              </div>
-              <div>
-                <p className="text-xs text-slate-500 font-bold uppercase">Current</p>
-                <p className="text-lg font-bold text-slate-200">{formatCurrency(mfCurrent)}</p>
-              </div>
+      {unlinkedCount > 0 && (
+        <Card className="border-amber-500/20 bg-amber-500/5 print:hidden">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div className="text-sm text-slate-200">
+              {unlinkedCount} transactions need account assignment.
             </div>
-            <div className="pt-4 border-t border-slate-800">
-              <p className="text-xs text-slate-500 font-bold uppercase">Total P&L</p>
-              <div className={cn("text-xl font-bold flex items-center gap-2", mfPnL >= 0 ? "text-emerald-500" : "text-rose-500")}>
-                {formatCurrency(mfPnL)}
-                <span className="text-sm font-medium">({mfPnLPerc.toFixed(2)}%)</span>
-              </div>
-            </div>
+            <Button variant="secondary" onClick={() => setActiveTab("income")}>
+              Assign Now
+            </Button>
+          </div>
+        </Card>
+      )}
+
+      <section className="print-summary-only space-y-8">
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-4">
+          <StatCard
+            label="Net Worth"
+            value={formatCurrency(netWorth)}
+            accent="emerald"
+            helper="Assets - Liabilities"
+            icon={<TrendingUp className="h-4 w-4" />}
+          />
+          <StatCard label="Total Invested" value={formatCurrency(totalInvested)} accent="blue" helper="Principal amount" />
+          <StatCard
+            label="Current Value"
+            value={formatCurrency(totalCurrent)}
+            accent="amber"
+            helper={`${formatCurrency(Math.abs(totalPnL))} (${pnlPercentage.toFixed(2)}%)`}
+            icon={totalPnL >= 0 ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
+          />
+          <StatCard label="Total Debt" value={formatCurrency(totalLoans)} accent="rose" helper="Outstanding loans" />
+        </div>
+
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
+          <Card className="border-l-4 border-l-emerald-500 bg-emerald-500/5">
+            <p className="text-sm font-medium text-slate-400">Income</p>
+            <h3 className="mt-1 text-2xl font-bold text-emerald-400">{formatCurrency(monthIncome)}</h3>
+          </Card>
+          <Card className="border-l-4 border-l-rose-500 bg-rose-500/5">
+            <p className="text-sm font-medium text-slate-400">Expenses</p>
+            <h3 className="mt-1 text-2xl font-bold text-rose-400">{formatCurrency(monthExpense)}</h3>
+          </Card>
+          <Card className={`border-l-4 ${monthIncome - monthExpense >= 0 ? "border-l-emerald-500 bg-emerald-500/5" : "border-l-rose-500 bg-rose-500/5"}`}>
+            <p className="text-sm font-medium text-slate-400">Net</p>
+            <h3 className={`mt-1 text-2xl font-bold ${monthIncome - monthExpense >= 0 ? "text-emerald-400" : "text-rose-400"}`}>{formatCurrency(monthIncome - monthExpense)}</h3>
+          </Card>
+        </div>
+
+        <Card title="Transfer Summary" subtitle="Internal money movement this month.">
+          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+            <div className="text-slate-300">{monthTransfers.length} transfers this month</div>
+            <div className="font-bold text-slate-100">{formatCurrency(monthTransfers.reduce((sum, entry) => sum + entry.amount, 0))} moved between accounts</div>
           </div>
         </Card>
 
-        <Card title="Stocks Summary" subtitle="Combined performance across portfolios">
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <p className="text-xs text-slate-500 font-bold uppercase">Invested</p>
-                <p className="text-lg font-bold text-slate-200">{formatCurrency(stockInvested)}</p>
+        <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1.3fr_0.7fr] print:grid-cols-1">
+          <Card title="Needs Attention" subtitle="Quick signals that deserve a look this week.">
+            {attentionItems.length === 0 ? (
+              <div className="flex items-center gap-2 text-sm text-slate-400">
+                <Badge variant="success">Healthy</Badge>
+                No urgent issues detected.
               </div>
-              <div>
-                <p className="text-xs text-slate-500 font-bold uppercase">Current</p>
-                <p className="text-lg font-bold text-slate-200">{formatCurrency(stockCurrent)}</p>
-              </div>
-            </div>
-            <div className="pt-4 border-t border-slate-800">
-              <p className="text-xs text-slate-500 font-bold uppercase">Total P&L</p>
-              <div className={cn("text-xl font-bold flex items-center gap-2", stockPnL >= 0 ? "text-emerald-500" : "text-rose-500")}>
-                {formatCurrency(stockPnL)}
-                <span className="text-sm font-medium">({stockPnLPerc.toFixed(2)}%)</span>
-              </div>
-            </div>
-          </div>
-        </Card>
-      </div>
-
-      {/* Charts Section */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        <Card title="Income vs Expense" subtitle="Last 6 months performance">
-          <div className="h-[300px] w-full mt-4">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={chartData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-                <XAxis dataKey="month" stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} />
-                <YAxis stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(v) => `₹${v/1000}k`} />
-                <Tooltip 
-                  contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '12px' }}
-                  itemStyle={{ fontSize: '12px' }}
-                />
-                <Legend iconType="circle" />
-                <Bar dataKey="income" fill="#10b981" radius={[4, 4, 0, 0]} name="Income" />
-                <Bar dataKey="expense" fill="#f43f5e" radius={[4, 4, 0, 0]} name="Expense" />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </Card>
-
-        <Card title="Investment Allocation" subtitle="Current value distribution">
-          <div className="h-[300px] w-full mt-4">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={allocationData}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={60}
-                  outerRadius={80}
-                  paddingAngle={5}
-                  dataKey="value"
-                >
-                  {allocationData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                  ))}
-                </Pie>
-                <Tooltip 
-                  contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '12px' }}
-                  formatter={(v: number) => formatCurrency(v)}
-                />
-                <Legend verticalAlign="bottom" height={36}/>
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-        </Card>
-      </div>
-
-      {/* Stock Portfolios Breakdown */}
-      {data.investments.stockPortfolios.length > 0 && (
-        <Card title="Stock Portfolios Breakdown" subtitle="Performance by individual portfolio">
-          <Table 
-            headers={[
-              { label: "Portfolio" },
-              { label: "Broker" },
-              { label: "Invested" },
-              { label: "Current" },
-              { label: "P&L" },
-              { label: "Holdings" }
-            ]}
-          >
-            {data.investments.stockPortfolios.map(p => {
-              const invested = p.holdings.reduce((sum, h) => sum + (h.quantity * h.avgBuyPrice), 0);
-              const current = p.holdings.reduce((sum, h) => sum + (h.quantity * h.currentPrice), 0);
-              const pnl = current - invested;
-              const pnlPerc = invested > 0 ? (pnl / invested) * 100 : 0;
-              return (
-                <tr key={p.id} className="hover:bg-slate-800/30 transition-colors group">
-                  <td className="px-4 py-4">
-                    <div className="font-semibold text-slate-200 group-hover:text-emerald-400 transition-colors">{p.name}</div>
-                    <div className="text-xs text-slate-500">{p.ownerName}</div>
-                  </td>
-                  <td className="px-4 py-4">
-                    <Badge variant="info">{p.broker}</Badge>
-                  </td>
-                  <td className="px-4 py-4 text-slate-300 font-medium">{formatCurrency(invested)}</td>
-                  <td className="px-4 py-4 text-slate-200 font-bold">{formatCurrency(current)}</td>
-                  <td className="px-4 py-4">
-                    <div className={cn("font-bold", pnl >= 0 ? "text-emerald-500" : "text-rose-500")}>
-                      {formatCurrency(pnl)}
-                    </div>
-                    <div className={cn("text-[10px]", pnl >= 0 ? "text-emerald-600" : "text-rose-600")}>
-                      {pnlPerc.toFixed(1)}%
-                    </div>
-                  </td>
-                  <td className="px-4 py-4">
-                    <div className="flex -space-x-2 overflow-hidden">
-                      {p.holdings.slice(0, 3).map((h, i) => (
-                        <div key={i} className="inline-flex items-center justify-center w-8 h-8 text-[10px] font-bold text-white bg-slate-800 border-2 border-slate-900 rounded-full" title={h.companyName}>
-                          {h.ticker.slice(0, 2)}
-                        </div>
-                      ))}
-                      {p.holdings.length > 3 && (
-                        <div className="flex items-center justify-center w-8 h-8 text-[10px] font-bold text-slate-400 bg-slate-800 border-2 border-slate-900 rounded-full">
-                          +{p.holdings.length - 3}
-                        </div>
+            ) : (
+              <div className="space-y-3">
+                {attentionItems.map((item) => (
+                  <div key={item.id} className="flex items-start gap-3 rounded-2xl border border-slate-800 bg-slate-950 px-4 py-3">
+                    <AlertTriangle
+                      className={cn(
+                        "mt-0.5 h-4 w-4",
+                        item.severity === "danger"
+                          ? "text-rose-500"
+                          : item.severity === "warning"
+                            ? "text-amber-500"
+                            : "text-sky-500",
                       )}
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-            <tr className="bg-slate-900/50 border-t border-slate-800">
-              <td colSpan={2} className="px-4 py-4 font-bold text-slate-400">Total Stocks</td>
-              <td className="px-4 py-4 font-bold text-slate-200">{formatCurrency(stockInvested)}</td>
-              <td className="px-4 py-4 font-bold text-emerald-500">{formatCurrency(stockCurrent)}</td>
-              <td colSpan={2} className="px-4 py-4">
-                <div className={cn("font-bold", stockPnL >= 0 ? "text-emerald-500" : "text-rose-500")}>
-                  {formatCurrency(stockPnL)} ({stockPnLPerc.toFixed(1)}%)
+                    />
+                    <span className="text-sm text-slate-300">{item.message}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+
+          <Card title="Quick Summary" subtitle="At-a-glance portfolio activity.">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <SummaryChip icon={<Wallet className="h-5 w-5 text-emerald-500" />} label="Bank Balance" value={formatCurrency(bankBalance)} />
+              <SummaryChip
+                icon={<TrendingUp className="h-5 w-5 text-blue-500" />}
+                label="Active SIPs"
+                value={String(data.investments.mutualFunds.filter((mf) => mf.sipDetails?.status === "Active").length)}
+              />
+              <SummaryChip icon={<BarChart3 className="h-5 w-5 text-amber-500" />} label="Open FDs" value={String(data.investments.fd.length)} />
+              <SummaryChip icon={<CreditCard className="h-5 w-5 text-rose-500" />} label="Loans Active" value={String(data.loans.length)} />
+            </div>
+          </Card>
+        </div>
+
+        <div className="grid grid-cols-1 gap-8 xl:grid-cols-2 print:grid-cols-1">
+          <Card title="Income vs Expense" subtitle={`Recent monthly cashflow (${periodLabel}).`} className="min-w-0">
+            <div className="mt-4 h-[300px] min-w-0 w-full">
+              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={300}>
+                <BarChart data={cashflowData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                  <XAxis dataKey="month" stroke="#64748b" tickLine={false} axisLine={false} />
+                  <YAxis
+                    stroke="#64748b"
+                    tickLine={false}
+                    axisLine={false}
+                    tickFormatter={(value) => `₹${Math.round(value / 1000)}k`}
+                  />
+                  <Tooltip contentStyle={{ backgroundColor: "#0f172a", border: "1px solid #1e293b", borderRadius: 12 }} />
+                  <Legend iconType="circle" />
+                  <Bar dataKey="income" fill="#10b981" radius={[6, 6, 0, 0]} />
+                  <Bar dataKey="expense" fill="#f43f5e" radius={[6, 6, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </Card>
+
+          <Card title="Net Worth Trend" subtitle="Derived trailing 12-month view." className="min-w-0">
+            <div className="mt-4 h-[300px] min-w-0 w-full">
+              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={300}>
+                <AreaChart data={netWorthTrend}>
+                  <defs>
+                    <linearGradient id="netWorthGradient" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#10b981" stopOpacity={0.45} />
+                      <stop offset="95%" stopColor="#10b981" stopOpacity={0.02} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                  <XAxis dataKey="month" stroke="#64748b" tickLine={false} axisLine={false} />
+                  <YAxis stroke="#64748b" tickLine={false} axisLine={false} tickFormatter={(value) => `₹${Math.round(value / 1000)}k`} />
+                  <Tooltip contentStyle={{ backgroundColor: "#0f172a", border: "1px solid #1e293b", borderRadius: 12 }} />
+                  <Area type="monotone" dataKey="netWorth" stroke="#10b981" fill="url(#netWorthGradient)" strokeWidth={2} />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          </Card>
+        </div>
+
+        <div className="grid grid-cols-1 gap-8 xl:grid-cols-[0.9fr_1.1fr] print:grid-cols-1">
+          <Card title="Investment Allocation" subtitle="Current value distribution." className="min-w-0">
+            <div className="mt-4 h-[320px] min-w-0 w-full">
+              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={320}>
+                <PieChart>
+                  <Pie data={allocationData} dataKey="value" cx="50%" cy="50%" innerRadius={70} outerRadius={100} paddingAngle={4}>
+                    {allocationData.map((entry, index) => (
+                      <Cell key={entry.name} fill={colors[index % colors.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    contentStyle={{ backgroundColor: "#0f172a", border: "1px solid #1e293b", borderRadius: 12 }}
+                    formatter={(value: number) => formatCurrency(value)}
+                  />
+                  <Legend verticalAlign="bottom" />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+          </Card>
+
+          <Card title="Combined Stock View" subtitle="Normalized across Groww, Zerodha, and other portfolios.">
+            {stockHoldings.length === 0 ? (
+              <div className="py-12 text-center text-slate-500">No stock holdings recorded yet.</div>
+            ) : (
+              <Table
+                headers={[
+                  { label: "Stock" },
+                  { label: "Qty" },
+                  { label: "Invested" },
+                  { label: "Current" },
+                  { label: "P&L" },
+                  { label: "Portfolios" },
+                ]}
+              >
+                {stockHoldings.map((holding) => {
+                  const pnl = holding.totalCurrentValue - holding.totalInvested;
+                  return (
+                    <tr key={holding.name} className="hover:bg-slate-800/30">
+                      <td className="px-4 py-4">
+                        <div className="font-semibold text-slate-200">{holding.name}</div>
+                        <div className="text-xs text-slate-500">{holding.tickers.join(", ")}</div>
+                      </td>
+                      <td className="px-4 py-4 text-slate-300">{holding.totalQty}</td>
+                      <td className="px-4 py-4 text-slate-300">{formatCurrency(holding.totalInvested)}</td>
+                      <td className="px-4 py-4 font-semibold text-slate-100">{formatCurrency(holding.totalCurrentValue)}</td>
+                      <td className={cn("px-4 py-4 font-semibold", pnl >= 0 ? "text-emerald-500" : "text-rose-500")}>
+                        {formatCurrency(pnl)}
+                      </td>
+                      <td className="px-4 py-4 text-xs text-slate-400">{holding.portfolios.join(", ")}</td>
+                    </tr>
+                  );
+                })}
+              </Table>
+            )}
+          </Card>
+        </div>
+
+        <Card title="Print Summary" subtitle="This section is optimized for PDF/print export.">
+          <div className="space-y-6">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+              {summary.threeMonthCashflow.map((month) => (
+                <div key={month.key} className="rounded-2xl border border-slate-800 bg-slate-950 p-4">
+                  <div className="text-sm font-semibold text-slate-200">{month.month}</div>
+                  <div className="mt-3 space-y-1 text-sm text-slate-400">
+                    <div>Income: {formatCurrency(month.income)}</div>
+                    <div>Expense: {formatCurrency(month.expense)}</div>
+                  </div>
                 </div>
-              </td>
-            </tr>
-          </Table>
+              ))}
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse text-left text-sm">
+                <thead>
+                  <tr className="border-b border-slate-800 text-slate-500">
+                    <th className="px-4 py-3">Stock</th>
+                    <th className="px-4 py-3">Current Value</th>
+                    <th className="px-4 py-3">Portfolios</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {summary.combinedStocks.slice(0, 10).map((holding) => (
+                    <tr key={holding.name} className="border-b border-slate-800/50">
+                      <td className="px-4 py-3 text-slate-200">{holding.name}</td>
+                      <td className="px-4 py-3 text-slate-300">{formatCurrency(holding.totalCurrentValue)}</td>
+                      <td className="px-4 py-3 text-slate-400">{holding.portfolios.join(", ")}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </Card>
-      )}
+      </section>
+    </div>
+  );
+}
 
-      {/* Quick Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800 flex items-center gap-4">
-          <div className="p-3 bg-emerald-500/10 rounded-xl">
-            <Wallet className="w-6 h-6 text-emerald-500" />
-          </div>
-          <div>
-            <p className="text-xs text-slate-500 font-bold uppercase">Bank Balance</p>
-            <p className="text-lg font-bold">{formatCurrency(bankBalance)}</p>
-          </div>
-        </div>
+function StatCard({
+  label,
+  value,
+  helper,
+  accent,
+  icon,
+}: {
+  label: string;
+  value: string;
+  helper: string;
+  accent: "emerald" | "blue" | "amber" | "rose";
+  icon?: React.ReactNode;
+}) {
+  const accentClass = {
+    emerald: "border-l-emerald-500 bg-emerald-500/5",
+    blue: "border-l-blue-500 bg-blue-500/5",
+    amber: "border-l-amber-500 bg-amber-500/5",
+    rose: "border-l-rose-500 bg-rose-500/5",
+  }[accent];
 
-        <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800 flex items-center gap-4">
-          <div className="p-3 bg-blue-500/10 rounded-xl">
-            <TrendingUp className="w-6 h-6 text-blue-500" />
-          </div>
-          <div>
-            <p className="text-xs text-slate-500 font-bold uppercase">Active SIPs</p>
-            <p className="text-lg font-bold">{data.investments.mutualFunds.filter(mf => mf.sipDetails?.status === 'Active').length}</p>
-          </div>
-        </div>
+  return (
+    <Card className={cn("border-l-4", accentClass)}>
+      <p className="text-sm font-medium text-slate-400">{label}</p>
+      <h3 className="mt-1 text-2xl font-bold text-slate-100">{value}</h3>
+      <div className="mt-2 flex items-center gap-1 text-xs font-bold text-slate-400">
+        {icon}
+        {helper}
+      </div>
+    </Card>
+  );
+}
 
-        <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800 flex items-center gap-4">
-          <div className="p-3 bg-amber-500/10 rounded-xl">
-            <BarChart3 className="w-6 h-6 text-amber-500" />
-          </div>
-          <div>
-            <p className="text-xs text-slate-500 font-bold uppercase">Open FDs</p>
-            <p className="text-lg font-bold">{data.investments.fd.length}</p>
-          </div>
-        </div>
-
-        <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800 flex items-center gap-4">
-          <div className="p-3 bg-rose-500/10 rounded-xl">
-            <CreditCard className="w-6 h-6 text-rose-500" />
-          </div>
-          <div>
-            <p className="text-xs text-slate-500 font-bold uppercase">Loans Active</p>
-            <p className="text-lg font-bold">{data.loans.length}</p>
-          </div>
-        </div>
+function SummaryChip({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
+  return (
+    <div className="flex items-center gap-4 rounded-2xl border border-slate-800 bg-slate-950 p-4">
+      <div className="rounded-xl bg-slate-900 p-3">{icon}</div>
+      <div>
+        <p className="text-xs font-bold uppercase tracking-wider text-slate-500">{label}</p>
+        <p className="text-lg font-bold text-slate-100">{value}</p>
       </div>
     </div>
   );

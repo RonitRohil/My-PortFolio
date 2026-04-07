@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Redirecting...</title>
+    <script>
+      const repoBase = "/My-PortFolio/";
+      const path = window.location.pathname;
+      const search = window.location.search;
+      const hash = window.location.hash;
+      window.location.replace(
+        window.location.origin +
+          repoBase +
+          "?p=" +
+          encodeURIComponent(path.slice(repoBase.length)) +
+          (search ? "&q=" + encodeURIComponent(search.slice(1)) : "") +
+          hash,
+      );
+    </script>
+  </head>
+  <body></body>
+</html>
