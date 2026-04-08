@@ -4,7 +4,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { AuthGuard } from "./components/AuthGuard";
+import { AuthGuard, useAuthSession } from "./components/AuthGuard";
 import Layout from "./components/Layout";
 import { useAppData } from "./hooks/useAppData";
 import Dashboard from "./pages/Dashboard";
@@ -17,6 +17,7 @@ import { useAutoScheduler } from "./hooks/useAutoScheduler";
 import { PortfolioData } from "./types";
 
 function AppShell() {
+  const { signOut } = useAuthSession();
   const { data, loading, syncing, lastSync, storageSize, updateData, clearAllData } = useAppData();
   const [activeTab, setActiveTab] = useState("dashboard");
   const validTabs = useMemo(() => new Set(["dashboard", "bank", "investments", "transactions", "loans", "settings"]), []);
@@ -93,7 +94,7 @@ function AppShell() {
   }
 
   return (
-    <Layout activeTab={activeTab} setActiveTab={setActiveTab} data={data} lastSync={lastSync} syncing={syncing}>
+    <Layout activeTab={activeTab} setActiveTab={setActiveTab} data={data} lastSync={lastSync} syncing={syncing} onSignOut={signOut}>
       {renderContent()}
     </Layout>
   );

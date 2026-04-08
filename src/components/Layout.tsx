@@ -24,6 +24,7 @@ interface LayoutProps {
   data: PortfolioData;
   lastSync: Date | null;
   syncing: boolean;
+  onSignOut: () => Promise<void>;
 }
 
 const navItems = [
@@ -41,7 +42,7 @@ const resultIcons = {
   investment: TrendingUp,
 };
 
-export default function Layout({ children, activeTab, setActiveTab, data, lastSync, syncing }: LayoutProps) {
+export default function Layout({ children, activeTab, setActiveTab, data, lastSync, syncing, onSignOut }: LayoutProps) {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const results = useMemo(() => searchPortfolio(data, searchQuery), [data, searchQuery]);
@@ -133,17 +134,33 @@ export default function Layout({ children, activeTab, setActiveTab, data, lastSy
           <div className="hidden px-6 py-4 md:block">
             <div className="flex items-center justify-between gap-4">
               {searchBox}
-              <div className="shrink-0 text-right">
-                <SyncStatus lastSync={lastSync} />
-                {syncing && <div className="mt-1 text-[11px] text-slate-500">Syncing changes...</div>}
+              <div className="flex shrink-0 items-center gap-4">
+                <div className="text-right">
+                  <SyncStatus lastSync={lastSync} />
+                  {syncing && <div className="mt-1 text-[11px] text-slate-500">Syncing changes...</div>}
+                </div>
+                <button
+                  onClick={() => void onSignOut()}
+                  className="rounded-full border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs text-slate-300 transition hover:border-emerald-500/40 hover:text-white"
+                >
+                  Sign out
+                </button>
               </div>
             </div>
           </div>
           <div className="space-y-2 px-4 pb-4 md:hidden">
             {searchBox}
             <div className="flex items-center justify-between">
-              <SyncStatus lastSync={lastSync} />
-              {syncing && <div className="text-[11px] text-slate-500">Syncing...</div>}
+              <div>
+                <SyncStatus lastSync={lastSync} />
+                {syncing && <div className="mt-1 text-[11px] text-slate-500">Syncing...</div>}
+              </div>
+              <button
+                onClick={() => void onSignOut()}
+                className="rounded-full border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs text-slate-300 transition hover:border-emerald-500/40 hover:text-white"
+              >
+                Sign out
+              </button>
             </div>
           </div>
         </header>

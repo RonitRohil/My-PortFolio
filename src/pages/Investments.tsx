@@ -25,7 +25,10 @@ import {
   formatDate,
   getCombinedStockHoldings,
   getComputedSipInvested,
+  getExpenseMethods,
+  getAllAccounts,
   getMutualFundInvestedAmount,
+  isCashAccount,
   parseCSV,
 } from "../lib/utils";
 import { getTickerFromName, isSameStock, normalizeStockName } from "../utils/stockNormalizer";
@@ -48,17 +51,31 @@ export default function Investments({ data, updateData }: { data: PortfolioData;
   const [activePortfolioId, setActivePortfolioId] = useState("all");
   const [lumpsums, setLumpsums] = useState<LumpsumEntry[]>([]);
   const [hasSIP, setHasSIP] = useState(false);
+  const [sipFromAccountId, setSipFromAccountId] = useState<string>("acc_cash");
+  const [rdFromAccountId, setRdFromAccountId] = useState<string>("acc_cash");
   const [sortConfig, setSortConfig] = useState<{ key: string; direction: "asc" | "desc" } | null>(null);
+  const accounts = useMemo(() => getAllAccounts(data), [data]);
 
   useEffect(() => {
     if (editingItem && activeSubTab === "mf") {
       setLumpsums(editingItem.lumpsumEntries || []);
       setHasSIP(Boolean(editingItem.sipDetails));
+      setSipFromAccountId(editingItem.sipDetails?.fromAccountId || accounts[0]?.id || "acc_cash");
+    } else if (activeSubTab === "mf") {
+      setSipFromAccountId(accounts[0]?.id || "acc_cash");
     } else {
       setLumpsums([]);
       setHasSIP(false);
     }
-  }, [editingItem, activeSubTab]);
+  }, [editingItem, activeSubTab, accounts]);
+
+  useEffect(() => {
+    if (editingItem && activeSubTab === "rd") {
+      setRdFromAccountId(editingItem.fromAccountId || accounts[0]?.id || "acc_cash");
+    } else if (activeSubTab === "rd") {
+      setRdFromAccountId(accounts[0]?.id || "acc_cash");
+    }
+  }, [editingItem, activeSubTab, accounts]);
 
   useEffect(() => {
     if (activePortfolioId !== "all" && !data.investments.stockPortfolios.some((p) => p.id === activePortfolioId)) {
@@ -97,11 +114,15 @@ export default function Investments({ data, updateData }: { data: PortfolioData;
         category: formData.get("category") as MFCategory,
         currentValue: Number(formData.get("currentValue")),
         lumpsumEntries: lumpsums.filter((entry) => entry.amount > 0),
+        createdAt: editingItem?.createdAt || new Date().toISOString(),
         sipDetails: hasSIP
           ? {
               monthlyAmount: Number(formData.get("sipAmount")),
               startDate: formData.get("sipStartDate") as string,
               status: formData.get("sipStatus") as InvestmentStatus,
+              fromAccountId: sipFromAccountId,
+              fromAccountName: accounts.find((account) => account.id === sipFromAccountId)?.bankName || null,
+              paymentMethod: (isCashAccount(sipFromAccountId) ? "Cash" : formData.get("sipPaymentMethod")) as MutualFund["sipDetails"]["paymentMethod"],
               stoppedDate: (formData.get("sipStoppedDate") as string) || undefined,
             }
           : undefined,
@@ -147,6 +168,9 @@ export default function Investments({ data, updateData }: { data: PortfolioData;
         interestRate: Number(formData.get("interestRate")),
         startDate: formData.get("startDate") as string,
         maturityDate: formData.get("maturityDate") as string,
+        fromAccountId: editingItem?.fromAccountId || null,
+        fromAccountName: editingItem?.fromAccountName || null,
+        createdAt: editingItem?.createdAt || new Date().toISOString(),
       };
       investments.fd = editingItem ? investments.fd.map((item) => (item.id === id ? fd : item)) : [...investments.fd, fd];
     }
@@ -159,6 +183,10 @@ export default function Investments({ data, updateData }: { data: PortfolioData;
         interestRate: Number(formData.get("interestRate")),
         startDate: formData.get("startDate") as string,
         maturityDate: formData.get("maturityDate") as string,
+        fromAccountId: rdFromAccountId,
+        fromAccountName: accounts.find((account) => account.id === rdFromAccountId)?.bankName || null,
+        paymentMethod: (isCashAccount(rdFromAccountId) ? "Cash" : formData.get("rdPaymentMethod")) as RecurringDeposit["paymentMethod"],
+        createdAt: editingItem?.createdAt || new Date().toISOString(),
       };
       investments.rd = editingItem ? investments.rd.map((item) => (item.id === id ? rd : item)) : [...investments.rd, rd];
     }
@@ -323,6 +351,7 @@ export default function Investments({ data, updateData }: { data: PortfolioData;
                         <Badge variant={fund.sipDetails.status === "Active" ? "success" : "warning"}>
                           SIP {formatCurrency(fund.sipDetails.monthlyAmount)}
                         </Badge>
+                        {fund.sipDetails.fromAccountName && <span className="text-xs text-slate-500">From {fund.sipDetails.fromAccountName}</span>}
                         <span className="text-xs text-slate-500">Total SIP invested: {formatCurrency(getComputedSipInvested(fund.sipDetails))}</span>
                       </div>
                     )}
@@ -443,7 +472,7 @@ export default function Investments({ data, updateData }: { data: PortfolioData;
                   <td className="px-4 py-4"><div className="font-semibold text-slate-200">{formatCurrency(calculateRDInvested(rd.monthlyDeposit, rd.startDate, rd.maturityDate))}</div><div className="text-xs text-slate-500">{formatCurrency(rd.monthlyDeposit)}/month</div></td>
                   <td className="px-4 py-4 text-slate-300">{rd.interestRate}%</td>
                   <td className="px-4 py-4 text-slate-300">{formatDate(rd.maturityDate)}</td>
-                  <td className="px-4 py-4"><div className="font-semibold text-emerald-400">{formatCurrency(calculateRDValue(rd.monthlyDeposit, rd.interestRate, rd.startDate, rd.maturityDate))}</div><div className="text-xs text-slate-500">Maturity: {formatCurrency(calculateRDMaturityAmount(rd.monthlyDeposit, rd.interestRate, months))}</div></td>
+                  <td className="px-4 py-4"><div className="font-semibold text-emerald-400">{formatCurrency(calculateRDValue(rd.monthlyDeposit, rd.interestRate, rd.startDate, rd.maturityDate))}</div><div className="text-xs text-slate-500">Maturity: {formatCurrency(calculateRDMaturityAmount(rd.monthlyDeposit, rd.interestRate, months))}</div><div className="text-xs text-slate-500">{rd.fromAccountName ? `From ${rd.fromAccountName}` : "No source account"}</div></td>
                   <td className="px-4 py-4"><ActionButtons onEdit={() => { setEditingItem(rd); setIsModalOpen(true); }} onDelete={() => deleteItem(rd.id)} /></td>
                 </tr>
               );
@@ -475,6 +504,14 @@ export default function Investments({ data, updateData }: { data: PortfolioData;
                       {["Active", "Paused", "Stopped"].map((status) => <option key={status} value={status}>{status}</option>)}
                     </Select>
                     <Input label="Stopped Date" name="sipStoppedDate" type="date" defaultValue={editingItem?.sipDetails?.stoppedDate} />
+                    <Select label="Deduct From" value={sipFromAccountId} onChange={(event) => setSipFromAccountId(event.target.value)} className="md:col-span-2">
+                      {accounts.map((account) => <option key={account.id} value={account.id}>{account.bankName}</option>)}
+                    </Select>
+                    {!isCashAccount(sipFromAccountId) && (
+                      <Select label="Payment Method" name="sipPaymentMethod" defaultValue={editingItem?.sipDetails?.paymentMethod || "Net Banking"} className="md:col-span-2">
+                        {getExpenseMethods().filter((method) => method !== "Cash").map((method) => <option key={method} value={method}>{method}</option>)}
+                      </Select>
+                    )}
                   </div>
                 )}
               </div>
@@ -508,7 +545,7 @@ export default function Investments({ data, updateData }: { data: PortfolioData;
 
           {activeSubTab === "fd" && <div className="grid grid-cols-1 gap-4 md:grid-cols-2"><Input label="Bank Name" name="bankName" required defaultValue={editingItem?.bankName} className="md:col-span-2" /><Input label="Principal Amount" name="principal" type="number" required defaultValue={editingItem?.principal} /><Input label="Interest Rate (%)" name="interestRate" type="number" required defaultValue={editingItem?.interestRate} /><Input label="Start Date" name="startDate" type="date" required defaultValue={editingItem?.startDate} /><Input label="Maturity Date" name="maturityDate" type="date" required defaultValue={editingItem?.maturityDate} /></div>}
 
-          {activeSubTab === "rd" && <div className="grid grid-cols-1 gap-4 md:grid-cols-2"><Input label="Bank Name" name="bankName" required defaultValue={editingItem?.bankName} className="md:col-span-2" /><Input label="Monthly Deposit" name="monthlyDeposit" type="number" required defaultValue={editingItem?.monthlyDeposit} /><Input label="Interest Rate (%)" name="interestRate" type="number" required defaultValue={editingItem?.interestRate} /><Input label="Start Date" name="startDate" type="date" required defaultValue={editingItem?.startDate} /><Input label="Maturity Date" name="maturityDate" type="date" required defaultValue={editingItem?.maturityDate} /></div>}
+          {activeSubTab === "rd" && <div className="grid grid-cols-1 gap-4 md:grid-cols-2"><Input label="Bank Name" name="bankName" required defaultValue={editingItem?.bankName} className="md:col-span-2" /><Input label="Monthly Deposit" name="monthlyDeposit" type="number" required defaultValue={editingItem?.monthlyDeposit} /><Input label="Interest Rate (%)" name="interestRate" type="number" required defaultValue={editingItem?.interestRate} /><Input label="Start Date" name="startDate" type="date" required defaultValue={editingItem?.startDate} /><Input label="Maturity Date" name="maturityDate" type="date" required defaultValue={editingItem?.maturityDate} /><Select label="Deduct From" value={rdFromAccountId} onChange={(event) => setRdFromAccountId(event.target.value)} className="md:col-span-2">{accounts.map((account) => <option key={account.id} value={account.id}>{account.bankName}</option>)}</Select>{!isCashAccount(rdFromAccountId) && <Select label="Payment Method" name="rdPaymentMethod" defaultValue={editingItem?.paymentMethod || "Net Banking"} className="md:col-span-2">{getExpenseMethods().filter((method) => method !== "Cash").map((method) => <option key={method} value={method}>{method}</option>)}</Select>}</div>}
 
           <div className="flex gap-3 pt-4">
             <Button type="submit" className="flex-1" disabled={activeSubTab === "stocks" && activePortfolioId === "all"}>{editingItem ? "Update Investment" : "Add Investment"}</Button>

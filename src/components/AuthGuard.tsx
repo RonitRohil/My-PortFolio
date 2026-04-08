@@ -1,4 +1,4 @@
-import { ReactNode, useEffect, useState } from "react";
+import { createContext, ReactNode, useContext, useEffect, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { migrateLocalStorageToSupabase } from "../lib/migrateToSupabase";
 import { MIGRATION_FLAG_KEY } from "../lib/dataService";
@@ -6,6 +6,14 @@ import { supabase } from "../lib/supabase";
 
 interface Props {
   children: ReactNode;
+}
+
+const AuthSessionContext = createContext<{ signOut: () => Promise<void> } | null>(null);
+
+export function useAuthSession() {
+  const context = useContext(AuthSessionContext);
+  if (!context) throw new Error("useAuthSession must be used within AuthGuard");
+  return context;
 }
 
 export function AuthGuard({ children }: Props) {
@@ -107,15 +115,5 @@ export function AuthGuard({ children }: Props) {
     );
   }
 
-  return (
-    <>
-      {children}
-      <button
-        onClick={signOut}
-        className="fixed right-3 top-3 z-[60] rounded-full border border-slate-700 bg-slate-900/90 px-3 py-1.5 text-xs text-slate-300 backdrop-blur transition hover:border-emerald-500/40 hover:text-white"
-      >
-        Sign out
-      </button>
-    </>
-  );
+  return <AuthSessionContext.Provider value={{ signOut }}>{children}</AuthSessionContext.Provider>;
 }

@@ -45,6 +45,9 @@ create table if not exists mutual_funds (
   sip_monthly_amount numeric,
   sip_start_date date,
   sip_status text default 'Active',
+  sip_from_account_id text references bank_accounts(id),
+  sip_from_account_name text,
+  sip_payment_method text,
   sip_stopped_date date,
   created_at timestamptz default now(),
   updated_at timestamptz default now()
@@ -90,6 +93,8 @@ create table if not exists fixed_deposits (
   interest_rate numeric not null,
   start_date date not null,
   maturity_date date not null,
+  from_account_id text references bank_accounts(id),
+  from_account_name text,
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );
@@ -102,6 +107,9 @@ create table if not exists recurring_deposits (
   interest_rate numeric not null,
   start_date date not null,
   maturity_date date not null,
+  from_account_id text references bank_accounts(id),
+  from_account_name text,
+  payment_method text,
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );
@@ -154,6 +162,22 @@ create table if not exists settings (
   stock_name_mappings jsonb default '{}'::jsonb,
   updated_at timestamptz default now()
 );
+
+alter table mutual_funds add column if not exists sip_from_account_id text references bank_accounts(id);
+alter table mutual_funds add column if not exists sip_from_account_name text;
+alter table mutual_funds add column if not exists sip_payment_method text;
+alter table mutual_funds add column if not exists sip_stopped_date date;
+
+alter table fixed_deposits add column if not exists from_account_id text references bank_accounts(id);
+alter table fixed_deposits add column if not exists from_account_name text;
+
+alter table recurring_deposits add column if not exists from_account_id text references bank_accounts(id);
+alter table recurring_deposits add column if not exists from_account_name text;
+alter table recurring_deposits add column if not exists payment_method text;
+
+alter table recurring_rules add column if not exists last_processed_month text;
+alter table settings add column if not exists income_categories jsonb default '[]'::jsonb;
+alter table settings add column if not exists expense_categories jsonb default '[]'::jsonb;
 
 alter table bank_accounts enable row level security;
 alter table transactions enable row level security;

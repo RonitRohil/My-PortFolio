@@ -424,11 +424,11 @@ function StatCard({
 
 function SummaryChip({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
   return (
-    <div className="flex items-center gap-4 rounded-2xl border border-slate-800 bg-slate-950 p-4">
-      <div className="rounded-xl bg-slate-900 p-3">{icon}</div>
-      <div>
-        <p className="text-xs font-bold uppercase tracking-wider text-slate-500">{label}</p>
-        <p className="text-lg font-bold text-slate-100">{value}</p>
+    <div className="flex min-w-0 items-center gap-3 rounded-2xl border border-slate-800 bg-slate-950 p-4">
+      <div className="shrink-0 rounded-xl bg-slate-900 p-3">{icon}</div>
+      <div className="min-w-0">
+        <p className="break-words text-xs font-bold uppercase tracking-wider text-slate-500">{label}</p>
+        <p className="truncate text-lg font-bold text-slate-100 sm:text-xl">{value}</p>
       </div>
     </div>
   );
