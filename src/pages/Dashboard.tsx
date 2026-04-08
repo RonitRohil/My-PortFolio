@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { PortfolioData } from "../types";
 import { Badge, Button, Card, Table } from "../components/UI";
 import {
+  getCategoryBreakdown,
   calculateFDValue,
   calculateRDInvested,
   calculateRDValue,
@@ -92,6 +93,9 @@ export default function Dashboard({ data, setActiveTab }: { data: PortfolioData;
   const unlinkedCount = countUnlinkedTransactions(data);
   const unlinkedEntries = getUnlinkedEntries(data);
   const unlinkedTransactionCount = unlinkedEntries.income.length + unlinkedEntries.expenses.length;
+  const expenseReport = getCategoryBreakdown(data.expenses, "category").slice(0, 6);
+  const incomeReport = getCategoryBreakdown(data.income, "source").slice(0, 6);
+  const currentMonthLabel = now.toLocaleDateString("en-IN", { month: "long", year: "numeric" });
 
   const allocationData = [
     { name: "Mutual Funds", value: mfCurrent },
@@ -182,16 +186,31 @@ export default function Dashboard({ data, setActiveTab }: { data: PortfolioData;
 
         <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
           <Card className="border-l-4 border-l-emerald-500 bg-emerald-500/5">
-            <p className="text-sm font-medium text-slate-400">Income</p>
+            <div className="flex items-center gap-2">
+              <p className="text-sm font-medium text-slate-400">Monthly Income</p>
+              {monthIncome === 0 && <Badge variant="warning">No income recorded yet</Badge>}
+            </div>
+            <p className="mt-1 text-xs text-slate-500">{currentMonthLabel}</p>
             <h3 className="mt-1 text-2xl font-bold text-emerald-400">{formatCurrency(monthIncome)}</h3>
           </Card>
           <Card className="border-l-4 border-l-rose-500 bg-rose-500/5">
-            <p className="text-sm font-medium text-slate-400">Expenses</p>
+            <p className="text-sm font-medium text-slate-400">Monthly Expenses</p>
+            <p className="mt-1 text-xs text-slate-500">{currentMonthLabel}</p>
             <h3 className="mt-1 text-2xl font-bold text-rose-400">{formatCurrency(monthExpense)}</h3>
           </Card>
           <Card className={`border-l-4 ${monthIncome - monthExpense >= 0 ? "border-l-emerald-500 bg-emerald-500/5" : "border-l-rose-500 bg-rose-500/5"}`}>
-            <p className="text-sm font-medium text-slate-400">Net</p>
+            <div className="flex items-center gap-2">
+              <p className="text-sm font-medium text-slate-400">Monthly Cash Flow</p>
+              <span
+                className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-slate-700 text-[11px] font-bold text-slate-400"
+                title="This shows money in vs money out for the current month only. Your bank balance and investments are shown separately in Net Worth above."
+              >
+                ?
+              </span>
+            </div>
+            <p className="mt-1 text-xs text-slate-500">{currentMonthLabel}</p>
             <h3 className={`mt-1 text-2xl font-bold ${monthIncome - monthExpense >= 0 ? "text-emerald-400" : "text-rose-400"}`}>{formatCurrency(monthIncome - monthExpense)}</h3>
+            <p className="mt-1 text-xs text-slate-500">Income minus expenses this month</p>
           </Card>
         </div>
 
@@ -243,6 +262,35 @@ export default function Dashboard({ data, setActiveTab }: { data: PortfolioData;
             </div>
           </Card>
         </div>
+
+        <Card title="Category Snapshot" subtitle="Top categories from your current data.">
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+            <div>
+              <div className="mb-3 text-sm font-semibold text-slate-200">Expense Categories</div>
+              <div className="space-y-2">
+                {expenseReport.length === 0 && <div className="rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-slate-500">No expense categories used yet.</div>}
+                {expenseReport.map(([name, amount]) => (
+                  <div key={name} className="flex items-center justify-between rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm">
+                    <span className="text-slate-300">{name}</span>
+                    <span className="font-semibold text-rose-400">{formatCurrency(amount)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div>
+              <div className="mb-3 text-sm font-semibold text-slate-200">Income Categories</div>
+              <div className="space-y-2">
+                {incomeReport.length === 0 && <div className="rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-slate-500">No income categories used yet.</div>}
+                {incomeReport.map(([name, amount]) => (
+                  <div key={name} className="flex items-center justify-between rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm">
+                    <span className="text-slate-300">{name}</span>
+                    <span className="font-semibold text-emerald-400">{formatCurrency(amount)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </Card>
 
         <div className="grid grid-cols-1 gap-8 xl:grid-cols-2 print:grid-cols-1">
           <Card title="Income vs Expense" subtitle={`Recent monthly cashflow (${periodLabel}).`} className="min-w-0">

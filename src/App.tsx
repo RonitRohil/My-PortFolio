@@ -13,14 +13,15 @@ import Investments from "./pages/Investments";
 import Transactions from "./pages/Transactions";
 import LoansTracker from "./pages/LoansTracker";
 import Settings from "./pages/Settings";
+import StockMappings from "./pages/StockMappings";
 import { useAutoScheduler } from "./hooks/useAutoScheduler";
 import { PortfolioData } from "./types";
 
 function AppShell() {
   const { signOut } = useAuthSession();
-  const { data, loading, syncing, lastSync, storageSize, updateData, clearAllData } = useAppData();
+  const { data, loading, syncing, lastSync, updateData, clearAllData } = useAppData();
   const [activeTab, setActiveTab] = useState("dashboard");
-  const validTabs = useMemo(() => new Set(["dashboard", "bank", "investments", "transactions", "loans", "settings"]), []);
+  const validTabs = useMemo(() => new Set(["dashboard", "bank", "investments", "transactions", "loans", "stock-mappings", "settings"]), []);
 
   const getTabFromLocation = useCallback(() => {
     const hash = window.location.hash.replace(/^#\/?/, "");
@@ -70,13 +71,14 @@ function AppShell() {
         return <Transactions data={data} updateData={patchData} />;
       case "loans":
         return <LoansTracker data={data} updateData={patchData} />;
+      case "stock-mappings":
+        return <StockMappings data={data} updateData={patchData} />;
       case "settings":
         return (
           <Settings
             data={data}
             updateData={patchData}
             setActiveTab={setActiveTab}
-            storageSize={storageSize}
             clearAllData={clearAllData}
           />
         );

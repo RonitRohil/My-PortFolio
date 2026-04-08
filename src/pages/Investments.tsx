@@ -84,6 +84,20 @@ export default function Investments({ data, updateData }: { data: PortfolioData;
   }, [activePortfolioId, data.investments.stockPortfolios]);
 
   const combinedStocks = useMemo(() => getCombinedStockHoldings(data), [data]);
+  const stockSummary = useMemo(() => {
+    const rawHoldings = data.investments.stockPortfolios.reduce((sum, portfolio) => sum + portfolio.holdings.length, 0);
+    const totalInvested = combinedStocks.reduce((sum, holding) => sum + holding.totalInvested, 0);
+    const totalCurrentValue = combinedStocks.reduce((sum, holding) => sum + holding.totalCurrentValue, 0);
+    return {
+      portfolioCount: data.investments.stockPortfolios.length,
+      rawHoldings,
+      groupedStocks: combinedStocks.length,
+      totalInvested,
+      totalCurrentValue,
+      gainLoss: totalCurrentValue - totalInvested,
+    };
+  }, [combinedStocks, data.investments.stockPortfolios]);
+  const activePortfolio = data.investments.stockPortfolios.find((item) => item.id === activePortfolioId) || null;
 
   const handleSort = (key: string) => {
     setSortConfig((prev) => (prev?.key === key ? { key, direction: prev.direction === "asc" ? "desc" : "asc" } : { key, direction: "asc" }));
@@ -92,11 +106,14 @@ export default function Investments({ data, updateData }: { data: PortfolioData;
   const sorted = <T extends Record<string, any>>(items: T[]) => {
     if (!sortConfig) return items;
     return [...items].sort((a, b) => {
-      const valueA = a[sortConfig.key] || "";
-      const valueB = b[sortConfig.key] || "";
-      if (valueA < valueB) return sortConfig.direction === "asc" ? -1 : 1;
-      if (valueA > valueB) return sortConfig.direction === "asc" ? 1 : -1;
-      return 0;
+      const valueA = a[sortConfig.key] ?? "";
+      const valueB = b[sortConfig.key] ?? "";
+      if (typeof valueA === "number" && typeof valueB === "number") {
+        return sortConfig.direction === "asc" ? valueA - valueB : valueB - valueA;
+      }
+      return sortConfig.direction === "asc"
+        ? String(valueA).localeCompare(String(valueB))
+        : String(valueB).localeCompare(String(valueA));
     });
   };
 
@@ -294,7 +311,7 @@ export default function Investments({ data, updateData }: { data: PortfolioData;
     input.click();
   };
 
-  const portfolioHoldings = data.investments.stockPortfolios.find((item) => item.id === activePortfolioId)?.holdings || [];
+  const portfolioHoldings = activePortfolio?.holdings || [];
 
   return (
     <div className="space-y-8">
@@ -382,6 +399,19 @@ export default function Investments({ data, updateData }: { data: PortfolioData;
               </div>
             ) : (
               <>
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
+                  <CompactSummaryCard label="Portfolios" value={String(stockSummary.portfolioCount)} helper="Tracked stock accounts" />
+                  <CompactSummaryCard label="Holdings Rows" value={String(stockSummary.rawHoldings)} helper="Raw entries before grouping" />
+                  <CompactSummaryCard label="Grouped Stocks" value={String(stockSummary.groupedStocks)} helper="Merged by stock name" />
+                  <CompactSummaryCard label="Total Invested" value={formatCurrency(stockSummary.totalInvested)} helper="Combined stock cost basis" />
+                  <CompactSummaryCard
+                    label="Current Value"
+                    value={formatCurrency(stockSummary.totalCurrentValue)}
+                    helper={`${formatCurrency(stockSummary.gainLoss)} overall P&L`}
+                    tone={stockSummary.gainLoss >= 0 ? "positive" : "negative"}
+                  />
+                </div>
+
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="flex flex-wrap items-center gap-2 rounded-xl bg-slate-800/60 p-1">
                     <button onClick={() => setActivePortfolioId("all")} className={cn("rounded-lg px-3 py-1.5 text-xs font-bold", activePortfolioId === "all" ? "bg-emerald-500 text-white" : "text-slate-400")}>All Portfolios</button>
@@ -412,13 +442,31 @@ export default function Investments({ data, updateData }: { data: PortfolioData;
                 </div>
 
                 {activePortfolioId === "all" ? (
-                  <Table headers={[{ label: "Stock" }, { label: "Qty" }, { label: "Avg Price" }, { label: "Current" }, { label: "Value" }, { label: "Portfolios" }]}>
-                    {combinedStocks.map((holding) => (
+                  <Table
+                    headers={[
+                      { label: "Stock", key: "name" },
+                      { label: "Qty", key: "totalQty" },
+                      { label: "Avg Price", key: "weightedAvgPrice" },
+                      { label: "Current", key: "currentPrice" },
+                      { label: "Invested", key: "totalInvested" },
+                      { label: "Value", key: "totalCurrentValue" },
+                      { label: "Portfolios", key: "portfolioCount" },
+                    ]}
+                    onSort={handleSort}
+                    sortConfig={sortConfig || undefined}
+                  >
+                    {sorted(
+                      combinedStocks.map((holding) => ({
+                        ...holding,
+                        portfolioCount: holding.portfolios.length,
+                      })),
+                    ).map((holding) => (
                       <tr key={holding.name} className="hover:bg-slate-800/30">
                         <td className="px-4 py-4"><div className="font-semibold text-slate-200">{holding.name}</div><div className="text-xs text-slate-500">{holding.tickers.join(", ")}</div></td>
                         <td className="px-4 py-4 text-slate-300">{holding.totalQty}</td>
                         <td className="px-4 py-4 text-slate-300">{formatCurrency(holding.weightedAvgPrice)}</td>
                         <td className="px-4 py-4 text-slate-300">{formatCurrency(holding.currentPrice)}</td>
+                        <td className="px-4 py-4 text-slate-300">{formatCurrency(holding.totalInvested)}</td>
                         <td className="px-4 py-4 font-semibold text-slate-100">{formatCurrency(holding.totalCurrentValue)}</td>
                         <td className="px-4 py-4 text-xs text-slate-400">{holding.portfolios.join(", ")}</td>
                       </tr>
@@ -533,6 +581,22 @@ export default function Investments({ data, updateData }: { data: PortfolioData;
           {activeSubTab === "stocks" && (
             <div className="space-y-4">
               {activePortfolioId === "all" && <div className="flex items-center gap-2 rounded-xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-400"><AlertTriangle className="h-4 w-4" /> Select an individual portfolio before adding or editing holdings.</div>}
+              {activePortfolio && (
+                <div className="grid grid-cols-1 gap-3 rounded-2xl border border-slate-800 bg-slate-950 p-4 md:grid-cols-4">
+                  <MiniPortfolioStat label="Portfolio" value={activePortfolio.name} helper={`${activePortfolio.ownerName} / ${activePortfolio.broker}`} />
+                  <MiniPortfolioStat label="Holdings" value={String(activePortfolio.holdings.length)} helper="Use this to check duplicates while adding" />
+                  <MiniPortfolioStat
+                    label="Invested"
+                    value={formatCurrency(activePortfolio.holdings.reduce((sum, holding) => sum + holding.quantity * holding.avgBuyPrice, 0))}
+                    helper="Current portfolio cost basis"
+                  />
+                  <MiniPortfolioStat
+                    label="Current"
+                    value={formatCurrency(activePortfolio.holdings.reduce((sum, holding) => sum + holding.quantity * holding.currentPrice, 0))}
+                    helper="Portfolio market value"
+                  />
+                </div>
+              )}
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <Input label="Company Name" name="companyName" required defaultValue={editingItem?.companyName} className="md:col-span-2" />
                 <Input label="Ticker" name="ticker" required defaultValue={editingItem?.ticker} placeholder="RELIANCE" />
@@ -567,6 +631,42 @@ export default function Investments({ data, updateData }: { data: PortfolioData;
           </div>
         </form>
       </Modal>
+    </div>
+  );
+}
+
+function CompactSummaryCard({
+  label,
+  value,
+  helper,
+  tone = "neutral",
+}: {
+  label: string;
+  value: string;
+  helper: string;
+  tone?: "neutral" | "positive" | "negative";
+}) {
+  return (
+    <div className={`rounded-2xl border px-4 py-4 ${
+      tone === "positive"
+        ? "border-emerald-500/20 bg-emerald-500/5"
+        : tone === "negative"
+          ? "border-rose-500/20 bg-rose-500/5"
+          : "border-slate-800 bg-slate-950"
+    }`}>
+      <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{label}</div>
+      <div className="mt-2 text-xl font-bold text-slate-100">{value}</div>
+      <div className="mt-1 text-xs text-slate-500">{helper}</div>
+    </div>
+  );
+}
+
+function MiniPortfolioStat({ label, value, helper }: { label: string; value: string; helper: string }) {
+  return (
+    <div className="rounded-xl border border-slate-800 px-3 py-3">
+      <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">{label}</div>
+      <div className="mt-1 truncate text-sm font-semibold text-slate-100">{value}</div>
+      <div className="mt-1 text-xs text-slate-500">{helper}</div>
     </div>
   );
 }

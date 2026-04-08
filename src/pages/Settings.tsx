@@ -3,21 +3,13 @@ import initSqlJs from "sql.js";
 import sqlWasmUrl from "sql.js/dist/sql-wasm.wasm?url";
 import { CategoryDefinition, PortfolioData, ExpenseCategory, IncomeSource, PaymentMethod } from "../types";
 import { Badge, Button, Card, Input, Modal, Select, Table } from "../components/UI";
-import { AlertTriangle, Database, Download, Edit2, FileJson, FileSpreadsheet, Plus, Settings2, Trash2, Upload } from "lucide-react";
+import { AlertTriangle, Download, Edit2, FileJson, FileSpreadsheet, Plus, Settings2, Trash2, Upload } from "lucide-react";
 import {
-  formatCurrency,
   getAllAccounts,
-  getCategoryBreakdown,
   getCategoryDisplayPath,
   mergeImportedCategories,
 } from "../lib/utils";
-import {
-  addCustomMapping,
-  getCustomMappings,
-  getStockMappings,
-  normalizeStockName,
-  removeCustomMapping,
-} from "../utils/stockNormalizer";
+import { normalizeStockName } from "../utils/stockNormalizer";
 
 type ImportSummary = {
   incomeCount: number;
@@ -86,26 +78,19 @@ export default function Settings({
   data,
   updateData,
   setActiveTab,
-  storageSize,
   clearAllData,
 }: {
   data: PortfolioData;
   updateData: (d: Partial<PortfolioData>) => void;
   setActiveTab: (tab: string) => void;
-  storageSize: string;
   clearAllData: () => Promise<void>;
 }) {
   const [importSummary, setImportSummary] = useState<ImportSummary | null>(null);
   const [pendingImport, setPendingImport] = useState<PendingMyMoneyImport | null>(null);
   const [accountMappings, setAccountMappings] = useState<Record<string, string>>({});
-  const [mappingTicker, setMappingTicker] = useState("");
-  const [mappingName, setMappingName] = useState("");
   const [categoryEditor, setCategoryEditor] = useState<CategoryEditorState | null>(null);
   const incomeCategories = data.settings?.incomeCategories || [];
   const expenseCategories = data.settings?.expenseCategories || [];
-  const customMappings = useMemo(() => getCustomMappings(), [data]);
-  const expenseReport = useMemo(() => getCategoryBreakdown(data.expenses, "category"), [data.expenses]);
-  const incomeReport = useMemo(() => getCategoryBreakdown(data.income, "source"), [data.income]);
 
   const exportToJson = () => {
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
@@ -215,8 +200,6 @@ export default function Settings({
     setActiveTab("dashboard");
     window.setTimeout(() => window.print(), 200);
   };
-
-  const builtInCount = Object.keys(getStockMappings()).length - Object.keys(customMappings).length;
 
   const runMappedImport = () => {
     if (!pendingImport) return;
@@ -331,7 +314,7 @@ export default function Settings({
         <p className="text-slate-400">Import, export, tune app behaviour, and keep local data healthy.</p>
       </div>
 
-      <div className="grid grid-cols-1 gap-8 md:grid-cols-2">
+      <div className="grid grid-cols-1 gap-8">
         <Card title="Budget & Reporting" subtitle="Controls for monthly budget and yearly view mode.">
           <div className="space-y-4">
             <Input
@@ -375,18 +358,6 @@ export default function Settings({
                   {expenseCategories.filter((item) => !item.parentId).length} top-level, {expenseCategories.filter((item) => item.parentId).length} subcategories
                 </div>
               </div>
-            </div>
-          </div>
-        </Card>
-
-        <Card title="Storage Info" subtitle="Local browser storage usage for this app.">
-          <div className="flex items-center gap-4">
-            <div className="rounded-2xl bg-emerald-500/10 p-4">
-              <Database className="h-8 w-8 text-emerald-500" />
-            </div>
-            <div>
-              <p className="text-sm text-slate-400">Total Space Used</p>
-              <h3 className="text-2xl font-bold text-slate-100">{storageSize}</h3>
             </div>
           </div>
         </Card>
@@ -452,7 +423,7 @@ export default function Settings({
         </Card>
       </div>
 
-      <div className="grid grid-cols-1 gap-8 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
+      <div className="grid grid-cols-1 gap-8">
         <Card title="Import" subtitle="Bring transaction history into the app without duplicates." className="min-w-0">
           <div className="space-y-5">
             <div className="rounded-2xl border border-slate-800 bg-slate-950 p-5">
@@ -472,100 +443,11 @@ export default function Settings({
               </div>
             </div>
 
-            <div className="rounded-2xl border border-slate-800 bg-slate-950 p-5">
-              <h4 className="font-semibold text-slate-100">GitHub Pages Deployment</h4>
-              <p className="mt-1 text-sm text-slate-400">
-                The repository is configured for GitHub Pages deployment with a Vite base path, workflow, and 404 fallback.
-              </p>
-              <div className="mt-3 text-xs text-slate-500">
-                Update the repo name in `vite.config.ts` and `public/404.html` if the GitHub repository name changes.
-              </div>
-            </div>
-          </div>
-        </Card>
-
-        <Card title="Stock Name Mappings" subtitle={`Built-in mappings: ${builtInCount}. Custom mappings sync to localStorage.`} className="min-w-0">
-          <form
-            onSubmit={(event) => {
-              event.preventDefault();
-              if (!mappingTicker.trim() || !mappingName.trim()) return;
-              addCustomMapping(mappingTicker, mappingName);
-              setMappingTicker("");
-              setMappingName("");
-              updateData({ settings: { ...data.settings } });
-            }}
-            className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_auto]"
-          >
-            <Input label="NSE Code" value={mappingTicker} onChange={(event) => setMappingTicker(event.target.value)} placeholder="BAJFINANCE" />
-            <Input label="Company Name" value={mappingName} onChange={(event) => setMappingName(event.target.value)} placeholder="Bajaj Finance Limited" />
-            <Button type="submit" className="mt-auto w-full xl:w-auto">
-              Add Mapping
-            </Button>
-          </form>
-          <div className="mt-6 max-h-[420px] overflow-auto">
-            <Table headers={[{ label: "Ticker" }, { label: "Company Name" }, { label: "Type" }, { label: "Actions" }]}>
-              {Object.entries(getStockMappings()).map(([ticker, companyName]) => {
-                const isCustom = ticker in customMappings;
-                return (
-                  <tr key={ticker} className="hover:bg-slate-800/30">
-                    <td className="px-4 py-4 font-mono text-slate-200">{ticker}</td>
-                    <td className="px-4 py-4 text-slate-300">{companyName}</td>
-                    <td className="px-4 py-4">
-                      <Badge variant={isCustom ? "info" : "secondary"}>{isCustom ? "Custom" : "Built-in"}</Badge>
-                    </td>
-                    <td className="px-4 py-4">
-                      {isCustom ? (
-                        <button
-                          onClick={() => {
-                            removeCustomMapping(ticker);
-                            updateData({ settings: { ...data.settings } });
-                          }}
-                          className="text-sm text-rose-500 transition hover:text-rose-400"
-                        >
-                          Delete
-                        </button>
-                      ) : (
-                        <span className="text-xs text-slate-500">Protected</span>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </Table>
           </div>
         </Card>
       </div>
 
-      <div className="grid grid-cols-1 gap-8 xl:grid-cols-2">
-        <Card title="Category-wise Report" subtitle="Current totals grouped by imported or custom category names.">
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-            <div>
-              <div className="mb-3 text-sm font-semibold text-slate-200">Expenses</div>
-              <div className="space-y-2">
-                {expenseReport.slice(0, 10).map(([name, amount]) => (
-                  <div key={name} className="flex items-center justify-between rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm">
-                    <span className="text-slate-300">{name}</span>
-                    <span className="font-semibold text-rose-400">{formatCurrency(amount)}</span>
-                  </div>
-                ))}
-                {expenseReport.length === 0 && <div className="text-sm text-slate-500">No expense categories used yet.</div>}
-              </div>
-            </div>
-            <div>
-              <div className="mb-3 text-sm font-semibold text-slate-200">Income</div>
-              <div className="space-y-2">
-                {incomeReport.slice(0, 10).map(([name, amount]) => (
-                  <div key={name} className="flex items-center justify-between rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm">
-                    <span className="text-slate-300">{name}</span>
-                    <span className="font-semibold text-emerald-400">{formatCurrency(amount)}</span>
-                  </div>
-                ))}
-                {incomeReport.length === 0 && <div className="text-sm text-slate-500">No income categories used yet.</div>}
-              </div>
-            </div>
-          </div>
-        </Card>
-
+      <div className="grid grid-cols-1 gap-8">
         <Card title="Category Manager" subtitle="Edit imported categories and subcategories directly inside the app.">
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
             <CategoryManagerColumn

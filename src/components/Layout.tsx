@@ -8,6 +8,7 @@ import {
   Menu,
   Search,
   Settings,
+  SlidersHorizontal,
   TrendingUp,
   Wallet,
   X,
@@ -33,6 +34,7 @@ const navItems = [
   { id: "investments", label: "Investments", icon: TrendingUp },
   { id: "transactions", label: "Transactions", icon: ArrowDownCircle },
   { id: "loans", label: "Loans & EMI", icon: CreditCard },
+  { id: "stock-mappings", label: "Stock Mappings", icon: SlidersHorizontal },
   { id: "settings", label: "Data Management", icon: Settings },
 ];
 
