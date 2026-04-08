@@ -99,22 +99,41 @@ export function Select({ label, error, children, className, ...props }: React.Se
   );
 }
 
-export function Modal({ isOpen, onClose, title, children, className }: { isOpen: boolean, onClose: () => void, title: string, children: React.ReactNode, className?: string }) {
+export function Modal({
+  isOpen,
+  onClose,
+  title,
+  children,
+  className,
+  mobileSheet = false,
+}: {
+  isOpen: boolean,
+  onClose: () => void,
+  title: string,
+  children: React.ReactNode,
+  className?: string,
+  mobileSheet?: boolean,
+}) {
   if (!isOpen) return null;
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
+    <div className={cn("fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm modal-overlay", mobileSheet && "modal-overlay-sheet")}>
       <motion.div 
-        initial={{ opacity: 0, scale: 0.95 }}
-        animate={{ opacity: 1, scale: 1 }}
-        className={cn("bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-lg shadow-2xl overflow-hidden", className)}
+        initial={mobileSheet ? { opacity: 0, y: 28 } : { opacity: 0, scale: 0.95 }}
+        animate={mobileSheet ? { opacity: 1, y: 0 } : { opacity: 1, scale: 1 }}
+        className={cn("bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-lg shadow-2xl overflow-hidden modal-panel", mobileSheet && "mobile-sheet-panel", className)}
       >
-        <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between">
+        {mobileSheet && (
+          <div className="flex justify-center pt-3 mobile-sheet-handle-wrap">
+            <div className="h-1.5 w-12 rounded-full bg-slate-700 mobile-sheet-handle" />
+          </div>
+        )}
+        <div className="modal-header px-6 py-4 border-b border-slate-800 flex items-center justify-between">
           <h3 className="text-xl font-bold text-slate-100">{title}</h3>
           <button onClick={onClose} className="p-2 text-slate-400 hover:text-white transition-colors">
             <X className="w-6 h-6" />
           </button>
         </div>
-        <div className="p-6 max-h-[80vh] overflow-y-auto">
+        <div className="modal-body p-6 max-h-[80vh] overflow-y-auto">
           {children}
         </div>
       </motion.div>

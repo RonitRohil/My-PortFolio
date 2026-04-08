@@ -15,12 +15,15 @@ import {
 import { motion, AnimatePresence } from "motion/react";
 import { PortfolioData } from "../types";
 import { cn, searchPortfolio } from "../lib/utils";
+import { SyncStatus } from "./SyncStatus";
 
 interface LayoutProps {
   children: React.ReactNode;
   activeTab: string;
   setActiveTab: (tab: string) => void;
   data: PortfolioData;
+  lastSync: Date | null;
+  syncing: boolean;
 }
 
 const navItems = [
@@ -38,7 +41,7 @@ const resultIcons = {
   investment: TrendingUp,
 };
 
-export default function Layout({ children, activeTab, setActiveTab, data }: LayoutProps) {
+export default function Layout({ children, activeTab, setActiveTab, data, lastSync, syncing }: LayoutProps) {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const results = useMemo(() => searchPortfolio(data, searchQuery), [data, searchQuery]);
@@ -127,8 +130,22 @@ export default function Layout({ children, activeTab, setActiveTab, data }: Layo
               {isMobileMenuOpen ? <X /> : <Menu />}
             </button>
           </div>
-          <div className="hidden px-6 py-4 md:block">{searchBox}</div>
-          <div className="px-4 pb-4 md:hidden">{searchBox}</div>
+          <div className="hidden px-6 py-4 md:block">
+            <div className="flex items-center justify-between gap-4">
+              {searchBox}
+              <div className="shrink-0 text-right">
+                <SyncStatus lastSync={lastSync} />
+                {syncing && <div className="mt-1 text-[11px] text-slate-500">Syncing changes...</div>}
+              </div>
+            </div>
+          </div>
+          <div className="space-y-2 px-4 pb-4 md:hidden">
+            {searchBox}
+            <div className="flex items-center justify-between">
+              <SyncStatus lastSync={lastSync} />
+              {syncing && <div className="text-[11px] text-slate-500">Syncing...</div>}
+            </div>
+          </div>
         </header>
 
         <AnimatePresence>

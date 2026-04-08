@@ -1,5 +1,11 @@
 @import "tailwindcss";
 
+.transaction-date-header-mobile,
+.transaction-account-mobile,
+.mobile-sheet-handle-wrap {
+  display: none;
+}
+
 @media print {
   body {
     background: white !important;
@@ -53,5 +59,105 @@
   .border-emerald-500\/20,
   .border-rose-500\/20 {
     border-color: #d4d4d8 !important;
+  }
+}
+
+@media (max-width: 640px) {
+  .transaction-row {
+    padding: 9px 14px !important;
+    gap: 12px !important;
+  }
+
+  .transaction-main {
+    gap: 12px !important;
+  }
+
+  .transaction-icon {
+    width: 34px;
+    height: 34px;
+    padding: 0 !important;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .transaction-icon svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  .transaction-date-header-desktop {
+    display: none;
+  }
+
+  .transaction-date-header-mobile {
+    display: inline;
+  }
+
+  .transaction-description {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
+  }
+
+  .transaction-copy {
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+
+  .transaction-meta {
+    width: 100%;
+    align-items: flex-end !important;
+    justify-content: space-between;
+    gap: 12px !important;
+  }
+
+  .transaction-amount-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 2px;
+  }
+
+  .transaction-account-mobile {
+    display: block;
+  }
+
+  .transaction-copy > .text-xs.text-slate-500 {
+    display: none;
+  }
+
+  .modal-overlay-sheet {
+    align-items: flex-end;
+    justify-content: stretch;
+    padding: 0;
+  }
+
+  .mobile-sheet-panel {
+    max-width: none;
+    width: 100%;
+    margin-top: auto;
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+    border-bottom-width: 0;
+    max-height: min(88vh, 100dvh);
+  }
+
+  .mobile-sheet-handle-wrap {
+    display: flex;
+  }
+
+  .transaction-form-modal .modal-body {
+    padding-top: 1rem;
+    padding-bottom: 1.25rem;
+  }
+
+  .transaction-form-grid-2 {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 12px;
+    align-items: end;
   }
 }

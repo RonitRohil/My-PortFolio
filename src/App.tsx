@@ -4,9 +4,9 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { AuthGuard } from "./components/AuthGuard";
 import Layout from "./components/Layout";
-import { PortfolioData } from "./types";
-import { loadData, saveData } from "./lib/storage";
+import { useAppData } from "./hooks/useAppData";
 import Dashboard from "./pages/Dashboard";
 import BankAccounts from "./pages/BankAccounts";
 import Investments from "./pages/Investments";
@@ -14,9 +14,10 @@ import Transactions from "./pages/Transactions";
 import LoansTracker from "./pages/LoansTracker";
 import Settings from "./pages/Settings";
 import { useAutoScheduler } from "./hooks/useAutoScheduler";
+import { PortfolioData } from "./types";
 
-export default function App() {
-  const [data, setData] = useState<PortfolioData>(() => loadData());
+function AppShell() {
+  const { data, loading, syncing, lastSync, storageSize, updateData, clearAllData } = useAppData();
   const [activeTab, setActiveTab] = useState("dashboard");
   const validTabs = useMemo(() => new Set(["dashboard", "bank", "investments", "transactions", "loans", "settings"]), []);
 
@@ -44,47 +45,64 @@ export default function App() {
   }, [getTabFromLocation]);
 
   useEffect(() => {
-    saveData(data);
-  }, [data]);
-
-  useEffect(() => {
     const nextHash = `#/${activeTab}`;
     if (window.location.hash !== nextHash) {
       window.history.replaceState({}, "", `${window.location.pathname}${window.location.search}${nextHash}`);
     }
   }, [activeTab]);
 
-  const updateData = useCallback(
-    (newData: Partial<PortfolioData>) => {
-      setData((prev) => ({ ...prev, ...newData }));
-    },
-    [],
-  );
+  const patchData = useCallback((partial: Partial<PortfolioData>) => {
+    updateData(partial);
+  }, [updateData]);
 
-  useAutoScheduler(data, updateData);
+  useAutoScheduler(data, patchData);
 
   const renderContent = () => {
     switch (activeTab) {
       case "dashboard":
         return <Dashboard data={data} setActiveTab={setActiveTab} />;
       case "bank":
-        return <BankAccounts data={data} updateData={updateData} />;
+        return <BankAccounts data={data} updateData={patchData} />;
       case "investments":
-        return <Investments data={data} updateData={updateData} />;
+        return <Investments data={data} updateData={patchData} />;
       case "transactions":
-        return <Transactions data={data} updateData={updateData} />;
+        return <Transactions data={data} updateData={patchData} />;
       case "loans":
-        return <LoansTracker data={data} updateData={updateData} />;
+        return <LoansTracker data={data} updateData={patchData} />;
       case "settings":
-        return <Settings data={data} updateData={updateData} setActiveTab={setActiveTab} />;
+        return (
+          <Settings
+            data={data}
+            updateData={patchData}
+            setActiveTab={setActiveTab}
+            storageSize={storageSize}
+            clearAllData={clearAllData}
+          />
+        );
       default:
         return <Dashboard data={data} setActiveTab={setActiveTab} />;
     }
   };
 
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-950 text-slate-400">
+        Loading your portfolio...
+      </div>
+    );
+  }
+
   return (
-    <Layout activeTab={activeTab} setActiveTab={setActiveTab} data={data}>
+    <Layout activeTab={activeTab} setActiveTab={setActiveTab} data={data} lastSync={lastSync} syncing={syncing}>
       {renderContent()}
     </Layout>
+  );
+}
+
+export default function App() {
+  return (
+    <AuthGuard>
+      <AppShell />
+    </AuthGuard>
   );
 }

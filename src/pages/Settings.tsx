@@ -4,7 +4,6 @@ import sqlWasmUrl from "sql.js/dist/sql-wasm.wasm?url";
 import { CategoryDefinition, PortfolioData, ExpenseCategory, IncomeSource, PaymentMethod } from "../types";
 import { Badge, Button, Card, Input, Modal, Select, Table } from "../components/UI";
 import { AlertTriangle, Database, Download, Edit2, FileJson, FileSpreadsheet, Plus, Settings2, Trash2, Upload } from "lucide-react";
-import { clearAllData, getStorageSize } from "../lib/storage";
 import {
   formatCurrency,
   getAllAccounts,
@@ -87,10 +86,14 @@ export default function Settings({
   data,
   updateData,
   setActiveTab,
+  storageSize,
+  clearAllData,
 }: {
   data: PortfolioData;
   updateData: (d: Partial<PortfolioData>) => void;
   setActiveTab: (tab: string) => void;
+  storageSize: string;
+  clearAllData: () => Promise<void>;
 }) {
   const [importSummary, setImportSummary] = useState<ImportSummary | null>(null);
   const [pendingImport, setPendingImport] = useState<PendingMyMoneyImport | null>(null);
@@ -383,7 +386,7 @@ export default function Settings({
             </div>
             <div>
               <p className="text-sm text-slate-400">Total Space Used</p>
-              <h3 className="text-2xl font-bold text-slate-100">{getStorageSize()}</h3>
+              <h3 className="text-2xl font-bold text-slate-100">{storageSize}</h3>
             </div>
           </div>
         </Card>
@@ -600,7 +603,7 @@ export default function Settings({
             variant="danger"
             onClick={() => {
               if (confirm("CRITICAL: This will delete ALL your data forever. Are you sure?")) {
-                clearAllData();
+                void clearAllData();
               }
             }}
           >
