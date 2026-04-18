@@ -1,9 +1,9 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
+import Icon from "../components/Icon";
+import { Badge, Button, Card, Input, Modal, Select } from "../components/UI";
 import {
   BrokerType,
   FixedDeposit,
-  InvestmentStatus,
-  LumpsumEntry,
   MFCategory,
   MutualFund,
   PortfolioData,
@@ -11,671 +11,728 @@ import {
   Stock,
   StockPortfolio,
 } from "../types";
-import { Badge, Button, Card, Input, Modal, Select, Table } from "../components/UI";
-import { AlertTriangle, Briefcase, Edit2, FileUp, MinusCircle, Plus, PlusCircle, Trash2 } from "lucide-react";
 import {
   calculateFDValue,
-  calculateMaturityAmount,
   calculateRDInvested,
-  calculateRDMaturityAmount,
   calculateRDValue,
   calculateWeightedAverage,
-  cn,
   formatCurrency,
-  formatDate,
+  getAllAccounts,
   getCombinedStockHoldings,
   getComputedSipInvested,
-  getExpenseMethods,
-  getAllAccounts,
   getMutualFundInvestedAmount,
-  isCashAccount,
-  parseCSV,
 } from "../lib/utils";
-import { getTickerFromName, isSameStock, normalizeStockName } from "../utils/stockNormalizer";
 
 type InvestmentTab = "mf" | "stocks" | "fd" | "rd";
 
-const tabs: { id: InvestmentTab; label: string }[] = [
-  { id: "mf", label: "Mutual Funds" },
-  { id: "stocks", label: "Stocks" },
-  { id: "fd", label: "Fixed Deposits" },
-  { id: "rd", label: "Recurring Deposits" },
-];
+function compactINR(amount: number) {
+  const abs = Math.abs(amount);
+  const sign = amount < 0 ? "-" : "";
+  if (abs >= 1e7) return `${sign}Rs${(abs / 1e7).toFixed(abs >= 1e8 ? 1 : 2)} Cr`;
+  if (abs >= 1e5) return `${sign}Rs${(abs / 1e5).toFixed(abs >= 1e6 ? 1 : 2)} L`;
+  if (abs >= 1e3) return `${sign}Rs${(abs / 1e3).toFixed(1)}k`;
+  return `${sign}Rs${abs.toFixed(0)}`;
+}
 
-export default function Investments({ data, updateData }: { data: PortfolioData; updateData: (d: Partial<PortfolioData>) => void }) {
-  const [activeSubTab, setActiveSubTab] = useState<InvestmentTab>("mf");
-  const [isModalOpen, setIsModalOpen] = useState(false);
+function SegmentedTabs({
+  value,
+  onChange,
+  counts,
+}: {
+  value: InvestmentTab;
+  onChange: (value: InvestmentTab) => void;
+  counts: Record<InvestmentTab, number>;
+}) {
+  const options: Array<{ id: InvestmentTab; label: string }> = [
+    { id: "mf", label: "Mutual Funds" },
+    { id: "stocks", label: "Stocks" },
+    { id: "fd", label: "FDs" },
+    { id: "rd", label: "RDs" },
+  ];
+
+  return (
+    <div className="inline-flex rounded-full bg-[color:var(--bg-3)] p-1 hairline">
+      {options.map((option) => {
+        const active = value === option.id;
+        return (
+          <button
+            key={option.id}
+            onClick={() => onChange(option.id)}
+            className={`inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-[13px] font-semibold transition ${
+              active ? "bg-[color:var(--accent)] text-[color:var(--bg)]" : "text-[color:var(--ink-3)] hover:text-[color:var(--ink)]"
+            }`}
+          >
+            {option.label}
+            <span className={`rounded-full px-1.5 text-[10px] font-mono-num ${active ? "bg-black/20" : "bg-white/[0.05]"}`}>{counts[option.id]}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+export default function Investments({
+  data,
+  updateData,
+}: {
+  data: PortfolioData;
+  updateData: (d: Partial<PortfolioData>) => void;
+}) {
+  const [subTab, setSubTab] = useState<InvestmentTab>("mf");
+  const [isItemModalOpen, setIsItemModalOpen] = useState(false);
   const [isPortfolioModalOpen, setIsPortfolioModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<any>(null);
   const [editingPortfolio, setEditingPortfolio] = useState<StockPortfolio | null>(null);
-  const [activePortfolioId, setActivePortfolioId] = useState("all");
-  const [lumpsums, setLumpsums] = useState<LumpsumEntry[]>([]);
-  const [hasSIP, setHasSIP] = useState(false);
-  const [sipFromAccountId, setSipFromAccountId] = useState<string>("acc_cash");
-  const [rdFromAccountId, setRdFromAccountId] = useState<string>("acc_cash");
-  const [sortConfig, setSortConfig] = useState<{ key: string; direction: "asc" | "desc" } | null>(null);
+  const [activePortfolioId, setActivePortfolioId] = useState<string>("all");
+
   const accounts = useMemo(() => getAllAccounts(data), [data]);
+  const stockHoldings = getCombinedStockHoldings(data);
+  const mutualFundsInvested = data.investments.mutualFunds.reduce((sum, fund) => sum + getMutualFundInvestedAmount(fund), 0);
+  const mutualFundsCurrent = data.investments.mutualFunds.reduce((sum, fund) => sum + fund.currentValue, 0);
+  const stocksInvested = stockHoldings.reduce((sum, holding) => sum + holding.totalInvested, 0);
+  const stocksCurrent = stockHoldings.reduce((sum, holding) => sum + holding.totalCurrentValue, 0);
+  const fdCurrent = data.investments.fd.reduce((sum, fd) => sum + calculateFDValue(fd.principal, fd.interestRate, fd.startDate, fd.maturityDate), 0);
+  const rdCurrent = data.investments.rd.reduce((sum, rd) => sum + calculateRDValue(rd.monthlyDeposit, rd.interestRate, rd.startDate, rd.maturityDate), 0);
+  const fdInvested = data.investments.fd.reduce((sum, fd) => sum + fd.principal, 0);
+  const rdInvested = data.investments.rd.reduce((sum, rd) => sum + calculateRDInvested(rd.monthlyDeposit, rd.startDate, rd.maturityDate), 0);
+  const totalCurrent = mutualFundsCurrent + stocksCurrent + fdCurrent + rdCurrent;
+  const totalInvested = mutualFundsInvested + stocksInvested + fdInvested + rdInvested;
+  const pnl = totalCurrent - totalInvested;
+  const pnlPct = totalInvested > 0 ? (pnl / totalInvested) * 100 : 0;
 
-  useEffect(() => {
-    if (editingItem && activeSubTab === "mf") {
-      setLumpsums(editingItem.lumpsumEntries || []);
-      setHasSIP(Boolean(editingItem.sipDetails));
-      setSipFromAccountId(editingItem.sipDetails?.fromAccountId || accounts[0]?.id || "acc_cash");
-    } else if (activeSubTab === "mf") {
-      setSipFromAccountId(accounts[0]?.id || "acc_cash");
-    } else {
-      setLumpsums([]);
-      setHasSIP(false);
-    }
-  }, [editingItem, activeSubTab, accounts]);
-
-  useEffect(() => {
-    if (editingItem && activeSubTab === "rd") {
-      setRdFromAccountId(editingItem.fromAccountId || accounts[0]?.id || "acc_cash");
-    } else if (activeSubTab === "rd") {
-      setRdFromAccountId(accounts[0]?.id || "acc_cash");
-    }
-  }, [editingItem, activeSubTab, accounts]);
-
-  useEffect(() => {
-    if (activePortfolioId !== "all" && !data.investments.stockPortfolios.some((p) => p.id === activePortfolioId)) {
-      setActivePortfolioId(data.investments.stockPortfolios[0]?.id || "all");
-    }
-  }, [activePortfolioId, data.investments.stockPortfolios]);
-
-  const combinedStocks = useMemo(() => getCombinedStockHoldings(data), [data]);
-  const stockSummary = useMemo(() => {
-    const rawHoldings = data.investments.stockPortfolios.reduce((sum, portfolio) => sum + portfolio.holdings.length, 0);
-    const totalInvested = combinedStocks.reduce((sum, holding) => sum + holding.totalInvested, 0);
-    const totalCurrentValue = combinedStocks.reduce((sum, holding) => sum + holding.totalCurrentValue, 0);
-    return {
-      portfolioCount: data.investments.stockPortfolios.length,
-      rawHoldings,
-      groupedStocks: combinedStocks.length,
-      totalInvested,
-      totalCurrentValue,
-      gainLoss: totalCurrentValue - totalInvested,
-    };
-  }, [combinedStocks, data.investments.stockPortfolios]);
-  const activePortfolio = data.investments.stockPortfolios.find((item) => item.id === activePortfolioId) || null;
-
-  const handleSort = (key: string) => {
-    setSortConfig((prev) => (prev?.key === key ? { key, direction: prev.direction === "asc" ? "desc" : "asc" } : { key, direction: "asc" }));
+  const counts = {
+    mf: data.investments.mutualFunds.length,
+    stocks: stockHoldings.length,
+    fd: data.investments.fd.length,
+    rd: data.investments.rd.length,
   };
 
-  const sorted = <T extends Record<string, any>>(items: T[]) => {
-    if (!sortConfig) return items;
-    return [...items].sort((a, b) => {
-      const valueA = a[sortConfig.key] ?? "";
-      const valueB = b[sortConfig.key] ?? "";
-      if (typeof valueA === "number" && typeof valueB === "number") {
-        return sortConfig.direction === "asc" ? valueA - valueB : valueB - valueA;
-      }
-      return sortConfig.direction === "asc"
-        ? String(valueA).localeCompare(String(valueB))
-        : String(valueB).localeCompare(String(valueA));
-    });
-  };
+  const activePortfolio = data.investments.stockPortfolios.find((portfolio) => portfolio.id === activePortfolioId) || null;
 
-  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const formData = new FormData(event.currentTarget);
-    const id = editingItem?.id || Date.now().toString();
-    const investments = { ...data.investments };
-
-    if (activeSubTab === "mf") {
-      const fund: MutualFund = {
-        id,
-        fundName: formData.get("fundName") as string,
-        amc: formData.get("amc") as string,
-        category: formData.get("category") as MFCategory,
-        currentValue: Number(formData.get("currentValue")),
-        lumpsumEntries: lumpsums.filter((entry) => entry.amount > 0),
-        createdAt: editingItem?.createdAt || new Date().toISOString(),
-        sipDetails: hasSIP
-          ? {
-              monthlyAmount: Number(formData.get("sipAmount")),
-              startDate: formData.get("sipStartDate") as string,
-              status: formData.get("sipStatus") as InvestmentStatus,
-              fromAccountId: sipFromAccountId,
-              fromAccountName: accounts.find((account) => account.id === sipFromAccountId)?.bankName || null,
-              paymentMethod: (isCashAccount(sipFromAccountId) ? "Cash" : formData.get("sipPaymentMethod")) as MutualFund["sipDetails"]["paymentMethod"],
-              stoppedDate: (formData.get("sipStoppedDate") as string) || undefined,
-            }
-          : undefined,
-      };
-      investments.mutualFunds = editingItem
-        ? investments.mutualFunds.map((item) => (item.id === id ? fund : item))
-        : [...investments.mutualFunds, fund];
+  const openCreateForTab = () => {
+    if (subTab === "stocks" && data.investments.stockPortfolios.length === 0) {
+      setEditingPortfolio(null);
+      setIsPortfolioModalOpen(true);
+      return;
     }
-
-    if (activeSubTab === "stocks") {
-      const portfolio = investments.stockPortfolios.find((item) => item.id === activePortfolioId);
-      if (!portfolio) return;
-      const companyName = normalizeStockName((formData.get("companyName") as string) || "");
-      const ticker = ((formData.get("ticker") as string) || getTickerFromName(companyName)).toUpperCase();
-      const quantity = Number(formData.get("quantity"));
-      const avgBuyPrice = Number(formData.get("avgBuyPrice"));
-      const currentPrice = Number(formData.get("currentPrice"));
-      const existingIndex = portfolio.holdings.findIndex((holding) => holding.id !== editingItem?.id && isSameStock(holding.companyName, companyName));
-
-      if (existingIndex >= 0 && !editingItem) {
-        const existing = portfolio.holdings[existingIndex];
-        portfolio.holdings[existingIndex] = {
-          ...existing,
-          companyName,
-          ticker,
-          quantity: existing.quantity + quantity,
-          avgBuyPrice: calculateWeightedAverage(existing.quantity, existing.avgBuyPrice, quantity, avgBuyPrice),
-          currentPrice,
-        };
-      } else {
-        const stock: Stock = { id, companyName, ticker, quantity, avgBuyPrice, currentPrice };
-        portfolio.holdings = editingItem ? portfolio.holdings.map((item) => (item.id === id ? stock : item)) : [...portfolio.holdings, stock];
-      }
-
-      investments.stockPortfolios = investments.stockPortfolios.map((item) => (item.id === portfolio.id ? portfolio : item));
-    }
-
-    if (activeSubTab === "fd") {
-      const fd: FixedDeposit = {
-        id,
-        bankName: formData.get("bankName") as string,
-        principal: Number(formData.get("principal")),
-        interestRate: Number(formData.get("interestRate")),
-        startDate: formData.get("startDate") as string,
-        maturityDate: formData.get("maturityDate") as string,
-        fromAccountId: editingItem?.fromAccountId || null,
-        fromAccountName: editingItem?.fromAccountName || null,
-        createdAt: editingItem?.createdAt || new Date().toISOString(),
-      };
-      investments.fd = editingItem ? investments.fd.map((item) => (item.id === id ? fd : item)) : [...investments.fd, fd];
-    }
-
-    if (activeSubTab === "rd") {
-      const rd: RecurringDeposit = {
-        id,
-        bankName: formData.get("bankName") as string,
-        monthlyDeposit: Number(formData.get("monthlyDeposit")),
-        interestRate: Number(formData.get("interestRate")),
-        startDate: formData.get("startDate") as string,
-        maturityDate: formData.get("maturityDate") as string,
-        fromAccountId: rdFromAccountId,
-        fromAccountName: accounts.find((account) => account.id === rdFromAccountId)?.bankName || null,
-        paymentMethod: (isCashAccount(rdFromAccountId) ? "Cash" : formData.get("rdPaymentMethod")) as RecurringDeposit["paymentMethod"],
-        createdAt: editingItem?.createdAt || new Date().toISOString(),
-      };
-      investments.rd = editingItem ? investments.rd.map((item) => (item.id === id ? rd : item)) : [...investments.rd, rd];
-    }
-
-    updateData({ investments });
-    setIsModalOpen(false);
     setEditingItem(null);
+    setIsItemModalOpen(true);
   };
 
-  const handlePortfolioSubmit = (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const formData = new FormData(event.currentTarget);
-    const id = editingPortfolio?.id || `portfolio_${Date.now()}`;
-    const portfolio: StockPortfolio = {
-      id,
-      name: formData.get("name") as string,
-      ownerName: formData.get("ownerName") as string,
-      broker: formData.get("broker") as BrokerType,
-      holdings: editingPortfolio?.holdings || [],
-    };
-    const stockPortfolios = editingPortfolio
-      ? data.investments.stockPortfolios.map((item) => (item.id === id ? portfolio : item))
-      : [...data.investments.stockPortfolios, portfolio];
-    updateData({ investments: { ...data.investments, stockPortfolios } });
-    setActivePortfolioId(id);
-    setIsPortfolioModalOpen(false);
-    setEditingPortfolio(null);
-  };
+  const removeItem = (id: string) => {
+    if (!confirm("Delete this item?")) return;
 
-  const deleteItem = (id: string) => {
-    if (!confirm("Are you sure you want to delete this investment?")) return;
-    const investments = { ...data.investments };
-    if (activeSubTab === "mf") investments.mutualFunds = investments.mutualFunds.filter((item) => item.id !== id);
-    if (activeSubTab === "fd") investments.fd = investments.fd.filter((item) => item.id !== id);
-    if (activeSubTab === "rd") investments.rd = investments.rd.filter((item) => item.id !== id);
-    if (activeSubTab === "stocks" && activePortfolioId !== "all") {
-      investments.stockPortfolios = investments.stockPortfolios.map((portfolio) =>
-        portfolio.id === activePortfolioId ? { ...portfolio, holdings: portfolio.holdings.filter((item) => item.id !== id) } : portfolio,
-      );
+    if (subTab === "mf") {
+      updateData({ investments: { ...data.investments, mutualFunds: data.investments.mutualFunds.filter((item) => item.id !== id) } });
+      return;
     }
-    updateData({ investments });
-  };
-
-  const deletePortfolio = (id: string) => {
-    if (!confirm("Delete this portfolio and all its holdings?")) return;
-    const stockPortfolios = data.investments.stockPortfolios.filter((item) => item.id !== id);
-    updateData({ investments: { ...data.investments, stockPortfolios } });
-    setActivePortfolioId(stockPortfolios[0]?.id || "all");
-  };
-
-  const handleImport = (portfolioId: string, broker: BrokerType) => {
-    const input = document.createElement("input");
-    input.type = "file";
-    input.accept = ".csv";
-    input.onchange = async (event: Event) => {
-      const file = (event.target as HTMLInputElement).files?.[0];
-      if (!file) return;
-      const rows = parseCSV(await file.text());
-      const portfolio = data.investments.stockPortfolios.find((item) => item.id === portfolioId);
-      if (!portfolio) return;
-
-      const findCol = (row: Record<string, string>, aliases: string[]) => {
-        const key = Object.keys(row).find((candidate) => aliases.map((alias) => alias.toLowerCase()).includes(candidate.toLowerCase().trim()));
-        return key ? row[key] : undefined;
-      };
-      const parseNum = (value?: string) => Number((value || "").replace(/[^0-9.-]/g, ""));
-      const holdings: Stock[] = [];
-
-      rows.forEach((row) => {
-        let ticker = "";
-        let companyName = "";
-        if (broker === "Groww") {
-          companyName = normalizeStockName(findCol(row, ["Stock Name", "Stock", "Company", "Instrument"]) || "");
-          ticker = ((findCol(row, ["Ticker", "Symbol"]) || getTickerFromName(companyName)) as string).toUpperCase();
-        } else if (broker === "Zerodha") {
-          ticker = ((findCol(row, ["Instrument", "Symbol", "Ticker"]) || "") as string).toUpperCase();
-          companyName = normalizeStockName(ticker);
-        } else {
-          companyName = normalizeStockName(findCol(row, ["Stock Name", "Company", "Stock"]) || "");
-          ticker = ((findCol(row, ["Ticker", "Symbol", "Instrument"]) || getTickerFromName(companyName)) as string).toUpperCase();
-        }
-        const quantity = parseNum(findCol(row, ["Quantity", "Qty", "Qty.", "Shares"]));
-        const avgBuyPrice = parseNum(findCol(row, ["Average buy price", "Average Price", "Avg Price", "Avg Cost", "Avg. cost"]));
-        const currentPrice = parseNum(findCol(row, ["Closing price", "Current Price", "LTP", "Market Price"]));
-        if (!companyName || !ticker || quantity <= 0) return;
-        const existing = portfolio.holdings.find((item) => isSameStock(item.companyName, companyName));
-        holdings.push({
-          id: existing?.id || Math.random().toString(36).slice(2, 11),
-          companyName,
-          ticker,
-          quantity,
-          avgBuyPrice,
-          currentPrice: currentPrice > 0 ? currentPrice : existing?.currentPrice || avgBuyPrice,
-        });
-      });
-
+    if (subTab === "fd") {
+      updateData({ investments: { ...data.investments, fd: data.investments.fd.filter((item) => item.id !== id) } });
+      return;
+    }
+    if (subTab === "rd") {
+      updateData({ investments: { ...data.investments, rd: data.investments.rd.filter((item) => item.id !== id) } });
+      return;
+    }
+    if (subTab === "stocks" && activePortfolio) {
       updateData({
         investments: {
           ...data.investments,
-          stockPortfolios: data.investments.stockPortfolios.map((item) => (item.id === portfolioId ? { ...item, holdings } : item)),
+          stockPortfolios: data.investments.stockPortfolios.map((portfolio) =>
+            portfolio.id === activePortfolio.id ? { ...portfolio, holdings: portfolio.holdings.filter((holding) => holding.id !== id) } : portfolio,
+          ),
         },
       });
-      alert("CSV import completed with stock-name normalization applied.");
-    };
-    input.click();
+    }
   };
 
-  const portfolioHoldings = activePortfolio?.holdings || [];
-
   return (
-    <div className="space-y-8">
-      <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
+    <div className="space-y-4 px-4 pt-4 pb-8 lg:px-0">
+      <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-3xl font-bold text-slate-100">Investments</h2>
-          <p className="text-slate-400">Track your wealth across mutual funds, stocks, FDs, and RDs.</p>
+          <div className="font-display text-[20px] font-semibold">Investments</div>
+          <div className="text-[11.5px] text-[color:var(--ink-4)]">Portfolio overview</div>
         </div>
-        <Button onClick={() => setIsModalOpen(true)} className="flex items-center gap-2">
-          <Plus className="h-5 w-5" />
-          Add Investment
+        <Button size="sm" variant="secondary" onClick={openCreateForTab} icon={<Icon name="plus" size={14} />}>
+          Add
         </Button>
       </div>
 
-      <div className="inline-flex rounded-2xl border border-slate-800 bg-slate-900 p-1">
-        {tabs.map((tab) => (
-          <button
-            key={tab.id}
-            onClick={() => {
-              setActiveSubTab(tab.id);
-              setSortConfig(null);
-            }}
-            className={cn("rounded-xl px-4 py-2 text-sm font-semibold transition", activeSubTab === tab.id ? "bg-emerald-500 text-white" : "text-slate-400")}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
-
-      <Card>
-        {activeSubTab === "mf" && (
-          <Table
-            headers={[
-              { label: "Fund Name", key: "fundName" },
-              { label: "Category", key: "category" },
-              { label: "Invested" },
-              { label: "Current", key: "currentValue" },
-              { label: "P&L" },
-              { label: "Actions" },
-            ]}
-            onSort={handleSort}
-            sortConfig={sortConfig || undefined}
-          >
-            {sorted(data.investments.mutualFunds).map((fund: MutualFund) => {
-              const invested = getMutualFundInvestedAmount(fund);
-              const pnl = fund.currentValue - invested;
-              return (
-                <tr key={fund.id} className="hover:bg-slate-800/30">
-                  <td className="px-4 py-4">
-                    <div className="font-semibold text-slate-200">{fund.fundName}</div>
-                    <div className="text-xs text-slate-500">{fund.amc}</div>
-                    {fund.sipDetails && (
-                      <div className="mt-1 flex flex-wrap items-center gap-2">
-                        <Badge variant={fund.sipDetails.status === "Active" ? "success" : "warning"}>
-                          SIP {formatCurrency(fund.sipDetails.monthlyAmount)}
-                        </Badge>
-                        {fund.sipDetails.fromAccountName && <span className="text-xs text-slate-500">From {fund.sipDetails.fromAccountName}</span>}
-                        <span className="text-xs text-slate-500">Total SIP invested: {formatCurrency(getComputedSipInvested(fund.sipDetails))}</span>
-                      </div>
-                    )}
-                  </td>
-                  <td className="px-4 py-4">
-                    <Badge variant="secondary">{fund.category}</Badge>
-                  </td>
-                  <td className="px-4 py-4 font-semibold text-slate-300">{formatCurrency(invested)}</td>
-                  <td className="px-4 py-4 font-semibold text-slate-100">{formatCurrency(fund.currentValue)}</td>
-                  <td className={cn("px-4 py-4 font-semibold", pnl >= 0 ? "text-emerald-500" : "text-rose-500")}>{formatCurrency(pnl)}</td>
-                  <td className="px-4 py-4">
-                    <ActionButtons onEdit={() => { setEditingItem(fund); setIsModalOpen(true); }} onDelete={() => deleteItem(fund.id)} />
-                  </td>
-                </tr>
-              );
-            })}
-          </Table>
-        )}
-
-        {activeSubTab === "stocks" && (
-          <div className="space-y-6">
-            {data.investments.stockPortfolios.length === 0 ? (
-              <div className="rounded-3xl border border-dashed border-slate-800 bg-slate-900/40 py-12 text-center">
-                <Briefcase className="mx-auto mb-4 h-12 w-12 text-slate-700" />
-                <h3 className="text-lg font-bold text-slate-300">No Stock Portfolios Yet</h3>
-                <p className="mb-6 text-sm text-slate-500">Create a portfolio first to start tracking holdings.</p>
-                <Button onClick={() => setIsPortfolioModalOpen(true)}>Create Portfolio</Button>
-              </div>
-            ) : (
-              <>
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
-                  <CompactSummaryCard label="Portfolios" value={String(stockSummary.portfolioCount)} helper="Tracked stock accounts" />
-                  <CompactSummaryCard label="Holdings Rows" value={String(stockSummary.rawHoldings)} helper="Raw entries before grouping" />
-                  <CompactSummaryCard label="Grouped Stocks" value={String(stockSummary.groupedStocks)} helper="Merged by stock name" />
-                  <CompactSummaryCard label="Total Invested" value={formatCurrency(stockSummary.totalInvested)} helper="Combined stock cost basis" />
-                  <CompactSummaryCard
-                    label="Current Value"
-                    value={formatCurrency(stockSummary.totalCurrentValue)}
-                    helper={`${formatCurrency(stockSummary.gainLoss)} overall P&L`}
-                    tone={stockSummary.gainLoss >= 0 ? "positive" : "negative"}
-                  />
-                </div>
-
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div className="flex flex-wrap items-center gap-2 rounded-xl bg-slate-800/60 p-1">
-                    <button onClick={() => setActivePortfolioId("all")} className={cn("rounded-lg px-3 py-1.5 text-xs font-bold", activePortfolioId === "all" ? "bg-emerald-500 text-white" : "text-slate-400")}>All Portfolios</button>
-                    {data.investments.stockPortfolios.map((portfolio) => (
-                      <button key={portfolio.id} onClick={() => setActivePortfolioId(portfolio.id)} className={cn("rounded-lg px-3 py-1.5 text-xs font-bold", activePortfolioId === portfolio.id ? "bg-emerald-500 text-white" : "text-slate-400")}>
-                        {portfolio.name}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Button variant="secondary" onClick={() => setIsPortfolioModalOpen(true)}><Plus className="h-4 w-4" /> Add Portfolio</Button>
-                    {activePortfolioId !== "all" && (
-                      <>
-                        <Button variant="secondary" onClick={() => {
-                          const portfolio = data.investments.stockPortfolios.find((item) => item.id === activePortfolioId);
-                          if (!portfolio) return;
-                          setEditingPortfolio(portfolio);
-                          setIsPortfolioModalOpen(true);
-                        }}><Edit2 className="h-4 w-4" /> Edit Portfolio</Button>
-                        <Button variant="secondary" onClick={() => {
-                          const portfolio = data.investments.stockPortfolios.find((item) => item.id === activePortfolioId);
-                          if (portfolio) handleImport(portfolio.id, portfolio.broker);
-                        }}><FileUp className="h-4 w-4" /> Import CSV</Button>
-                        <Button variant="ghost" onClick={() => deletePortfolio(activePortfolioId)}><Trash2 className="h-4 w-4" /> Delete Portfolio</Button>
-                      </>
-                    )}
-                  </div>
-                </div>
-
-                {activePortfolioId === "all" ? (
-                  <Table
-                    headers={[
-                      { label: "Stock", key: "name" },
-                      { label: "Qty", key: "totalQty" },
-                      { label: "Avg Price", key: "weightedAvgPrice" },
-                      { label: "Current", key: "currentPrice" },
-                      { label: "Invested", key: "totalInvested" },
-                      { label: "Value", key: "totalCurrentValue" },
-                      { label: "Portfolios", key: "portfolioCount" },
-                    ]}
-                    onSort={handleSort}
-                    sortConfig={sortConfig || undefined}
-                  >
-                    {sorted(
-                      combinedStocks.map((holding) => ({
-                        ...holding,
-                        portfolioCount: holding.portfolios.length,
-                      })),
-                    ).map((holding) => (
-                      <tr key={holding.name} className="hover:bg-slate-800/30">
-                        <td className="px-4 py-4"><div className="font-semibold text-slate-200">{holding.name}</div><div className="text-xs text-slate-500">{holding.tickers.join(", ")}</div></td>
-                        <td className="px-4 py-4 text-slate-300">{holding.totalQty}</td>
-                        <td className="px-4 py-4 text-slate-300">{formatCurrency(holding.weightedAvgPrice)}</td>
-                        <td className="px-4 py-4 text-slate-300">{formatCurrency(holding.currentPrice)}</td>
-                        <td className="px-4 py-4 text-slate-300">{formatCurrency(holding.totalInvested)}</td>
-                        <td className="px-4 py-4 font-semibold text-slate-100">{formatCurrency(holding.totalCurrentValue)}</td>
-                        <td className="px-4 py-4 text-xs text-slate-400">{holding.portfolios.join(", ")}</td>
-                      </tr>
-                    ))}
-                  </Table>
-                ) : (
-                  <Table headers={[{ label: "Stock", key: "companyName" }, { label: "Qty", key: "quantity" }, { label: "Avg Price", key: "avgBuyPrice" }, { label: "Current", key: "currentPrice" }, { label: "Value" }, { label: "Actions" }]} onSort={handleSort} sortConfig={sortConfig || undefined}>
-                    {sorted(portfolioHoldings).map((holding: Stock) => (
-                      <tr key={holding.id} className="hover:bg-slate-800/30">
-                        <td className="px-4 py-4"><div className="font-semibold text-slate-200">{normalizeStockName(holding.companyName)}</div><div className="text-xs font-mono text-slate-500">{holding.ticker}</div></td>
-                        <td className="px-4 py-4 text-slate-300">{holding.quantity}</td>
-                        <td className="px-4 py-4 text-slate-300">{formatCurrency(holding.avgBuyPrice)}</td>
-                        <td className="px-4 py-4 text-slate-300">{formatCurrency(holding.currentPrice)}</td>
-                        <td className="px-4 py-4 font-semibold text-slate-100">{formatCurrency(holding.quantity * holding.currentPrice)}</td>
-                        <td className="px-4 py-4"><ActionButtons onEdit={() => { setEditingItem(holding); setIsModalOpen(true); }} onDelete={() => deleteItem(holding.id)} /></td>
-                      </tr>
-                    ))}
-                  </Table>
-                )}
-              </>
-            )}
+      <Card className="relative overflow-hidden">
+        <div className="absolute inset-0 opacity-70" style={{ background: "radial-gradient(120% 80% at 100% 0%, color-mix(in oklch, var(--violet) 25%, transparent), transparent 60%)" }} />
+        <div className="relative">
+          <div className="text-[10.5px] font-semibold uppercase tracking-[0.12em] text-[color:var(--ink-4)]">Current value</div>
+          <div className="mt-1 font-display text-[30px] font-semibold tabular">{formatCurrency(totalCurrent)}</div>
+          <div className="mt-2 flex items-center gap-2">
+            <Badge variant={pnl >= 0 ? "success" : "danger"}>
+              <Icon name={pnl >= 0 ? "trend-up" : "trend-down"} size={10} />
+              {pnl >= 0 ? "+" : ""}{compactINR(pnl)} ({pnlPct.toFixed(1)}%)
+            </Badge>
+            <span className="text-[11.5px] text-[color:var(--ink-4)]">Invested {compactINR(totalInvested)}</span>
           </div>
-        )}
-
-        {activeSubTab === "fd" && (
-          <Table headers={[{ label: "Bank", key: "bankName" }, { label: "Principal", key: "principal" }, { label: "Rate", key: "interestRate" }, { label: "Maturity Date", key: "maturityDate" }, { label: "Current Value" }, { label: "Actions" }]} onSort={handleSort} sortConfig={sortConfig || undefined}>
-            {sorted(data.investments.fd).map((fd: FixedDeposit) => {
-              const years = (new Date(fd.maturityDate).getTime() - new Date(fd.startDate).getTime()) / (1000 * 60 * 60 * 24 * 365);
-              return (
-                <tr key={fd.id} className="hover:bg-slate-800/30">
-                  <td className="px-4 py-4 font-semibold text-slate-200">{fd.bankName}</td>
-                  <td className="px-4 py-4 text-slate-300">{formatCurrency(fd.principal)}</td>
-                  <td className="px-4 py-4 text-slate-300">{fd.interestRate}%</td>
-                  <td className="px-4 py-4 text-slate-300">{formatDate(fd.maturityDate)}</td>
-                  <td className="px-4 py-4"><div className="font-semibold text-emerald-400">{formatCurrency(calculateFDValue(fd.principal, fd.interestRate, fd.startDate, fd.maturityDate))}</div><div className="text-xs text-slate-500">Maturity: {formatCurrency(calculateMaturityAmount(fd.principal, fd.interestRate, years, 4))}</div></td>
-                  <td className="px-4 py-4"><ActionButtons onEdit={() => { setEditingItem(fd); setIsModalOpen(true); }} onDelete={() => deleteItem(fd.id)} /></td>
-                </tr>
-              );
+          <div className="mt-4 flex h-2 overflow-hidden rounded-full bg-white/5">
+            {[
+              { value: mutualFundsCurrent, color: "var(--violet)" },
+              { value: stocksCurrent, color: "var(--info)" },
+              { value: fdCurrent + rdCurrent, color: "var(--warn)" },
+            ].map((item, index, array) => {
+              const sum = array.reduce((acc, next) => acc + next.value, 0) || 1;
+              return <div key={index} style={{ width: `${(item.value / sum) * 100}%`, background: item.color }} />;
             })}
-          </Table>
-        )}
-
-        {activeSubTab === "rd" && (
-          <Table headers={[{ label: "Bank", key: "bankName" }, { label: "Monthly", key: "monthlyDeposit" }, { label: "Rate", key: "interestRate" }, { label: "Maturity Date", key: "maturityDate" }, { label: "Current Value" }, { label: "Actions" }]} onSort={handleSort} sortConfig={sortConfig || undefined}>
-            {sorted(data.investments.rd).map((rd: RecurringDeposit) => {
-              const years = (new Date(rd.maturityDate).getTime() - new Date(rd.startDate).getTime()) / (1000 * 60 * 60 * 24 * 365);
-              const months = Math.round(years * 12);
-              return (
-                <tr key={rd.id} className="hover:bg-slate-800/30">
-                  <td className="px-4 py-4 font-semibold text-slate-200">{rd.bankName}</td>
-                  <td className="px-4 py-4"><div className="font-semibold text-slate-200">{formatCurrency(calculateRDInvested(rd.monthlyDeposit, rd.startDate, rd.maturityDate))}</div><div className="text-xs text-slate-500">{formatCurrency(rd.monthlyDeposit)}/month</div></td>
-                  <td className="px-4 py-4 text-slate-300">{rd.interestRate}%</td>
-                  <td className="px-4 py-4 text-slate-300">{formatDate(rd.maturityDate)}</td>
-                  <td className="px-4 py-4"><div className="font-semibold text-emerald-400">{formatCurrency(calculateRDValue(rd.monthlyDeposit, rd.interestRate, rd.startDate, rd.maturityDate))}</div><div className="text-xs text-slate-500">Maturity: {formatCurrency(calculateRDMaturityAmount(rd.monthlyDeposit, rd.interestRate, months))}</div><div className="text-xs text-slate-500">{rd.fromAccountName ? `From ${rd.fromAccountName}` : "No source account"}</div></td>
-                  <td className="px-4 py-4"><ActionButtons onEdit={() => { setEditingItem(rd); setIsModalOpen(true); }} onDelete={() => deleteItem(rd.id)} /></td>
-                </tr>
-              );
-            })}
-          </Table>
-        )}
+          </div>
+          <div className="mt-2 grid grid-cols-3 gap-2 text-[10.5px]">
+            {[
+              ["Mutual Funds", "var(--violet)", mutualFundsCurrent],
+              ["Stocks", "var(--info)", stocksCurrent],
+              ["FDs/RDs", "var(--warn)", fdCurrent + rdCurrent],
+            ].map(([label, color, value]) => (
+              <div key={label} className="flex items-center gap-1.5">
+                <span className="h-2 w-2 rounded-full" style={{ background: color as string }} />
+                <span className="truncate text-[color:var(--ink-3)]">{label}</span>
+                <span className="ml-auto font-mono-num text-[color:var(--ink-2)]">{compactINR(value as number)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
       </Card>
 
-      <Modal isOpen={isModalOpen} onClose={() => { setIsModalOpen(false); setEditingItem(null); }} title={editingItem ? "Edit Investment" : "Add Investment"} className="max-w-3xl">
-        <form onSubmit={handleSubmit} className="space-y-6">
-          {activeSubTab === "mf" && (
-            <>
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                <Input label="Fund Name" name="fundName" required defaultValue={editingItem?.fundName} className="md:col-span-2" />
-                <Input label="AMC" name="amc" required defaultValue={editingItem?.amc} />
-                <Select label="Category" name="category" defaultValue={editingItem?.category || "Equity"}>
-                  {["Equity", "Debt", "Hybrid", "ELSS", "Index"].map((category) => <option key={category} value={category}>{category}</option>)}
-                </Select>
-                <Input label="Current Value" name="currentValue" type="number" required defaultValue={editingItem?.currentValue} className="md:col-span-2" />
-              </div>
+      <div className="overflow-x-auto no-scrollbar">
+        <SegmentedTabs value={subTab} onChange={setSubTab} counts={counts} />
+      </div>
 
-              <div className="space-y-4 rounded-2xl border border-slate-800 bg-slate-950 p-4">
-                <div className="flex items-center justify-between"><div className="font-semibold text-slate-200">SIP Details</div><button type="button" onClick={() => setHasSIP((value) => !value)} className="text-sm text-emerald-400">{hasSIP ? "Remove SIP" : "Add SIP"}</button></div>
-                {hasSIP && (
-                  <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
-                    <Input label="Monthly Amount" name="sipAmount" type="number" required defaultValue={editingItem?.sipDetails?.monthlyAmount} />
-                    <Input label="Start Date" name="sipStartDate" type="date" required defaultValue={editingItem?.sipDetails?.startDate} />
-                    <Select label="Status" name="sipStatus" defaultValue={editingItem?.sipDetails?.status || "Active"}>
-                      {["Active", "Paused", "Stopped"].map((status) => <option key={status} value={status}>{status}</option>)}
-                    </Select>
-                    <Input label="Stopped Date" name="sipStoppedDate" type="date" defaultValue={editingItem?.sipDetails?.stoppedDate} />
-                    <Select label="Deduct From" value={sipFromAccountId} onChange={(event) => setSipFromAccountId(event.target.value)} className="md:col-span-2">
-                      {accounts.map((account) => <option key={account.id} value={account.id}>{account.bankName}</option>)}
-                    </Select>
-                    {!isCashAccount(sipFromAccountId) && (
-                      <Select label="Payment Method" name="sipPaymentMethod" defaultValue={editingItem?.sipDetails?.paymentMethod || "Net Banking"} className="md:col-span-2">
-                        {getExpenseMethods().filter((method) => method !== "Cash").map((method) => <option key={method} value={method}>{method}</option>)}
-                      </Select>
-                    )}
+      {subTab === "mf" && (
+        <div className="space-y-2.5">
+          {data.investments.mutualFunds.map((fund) => {
+            const invested = getMutualFundInvestedAmount(fund);
+            const gainLoss = fund.currentValue - invested;
+            const pct = invested > 0 ? (gainLoss / invested) * 100 : 0;
+            const sip = fund.sipDetails;
+
+            return (
+              <Card key={fund.id} padded={false}>
+                <div className="flex items-center gap-3 p-4">
+                  <div
+                    className="grid h-10 w-10 place-items-center rounded-[12px] font-display text-[11px] font-semibold"
+                    style={{ background: "color-mix(in oklch, var(--violet) 18%, transparent)", color: "var(--violet)", boxShadow: "inset 0 0 0 1px color-mix(in oklch, var(--violet) 40%, transparent)" }}
+                  >
+                    {fund.amc.slice(0, 2).toUpperCase()}
                   </div>
-                )}
-              </div>
-
-              <div className="space-y-4 rounded-2xl border border-slate-800 bg-slate-950 p-4">
-                <div className="flex items-center justify-between"><div className="font-semibold text-slate-200">Lumpsum Entries</div><button type="button" onClick={() => setLumpsums((entries) => [...entries, { id: Date.now().toString(), date: new Date().toISOString().slice(0, 10), amount: 0 }])} className="flex items-center gap-1 text-sm text-emerald-400"><PlusCircle className="h-4 w-4" /> Add Entry</button></div>
-                {lumpsums.length === 0 && <div className="text-sm text-slate-500">No lumpsum entries added.</div>}
-                {lumpsums.map((entry) => (
-                  <div key={entry.id} className="grid grid-cols-[1fr_1fr_auto] gap-3">
-                    <Input type="date" value={entry.date} onChange={(event) => setLumpsums((current) => current.map((item) => (item.id === entry.id ? { ...item, date: event.target.value } : item)))} />
-                    <Input type="number" value={entry.amount} onChange={(event) => setLumpsums((current) => current.map((item) => (item.id === entry.id ? { ...item, amount: Number(event.target.value) } : item)))} />
-                    <button type="button" onClick={() => setLumpsums((current) => current.filter((item) => item.id !== entry.id))} className="text-slate-500 hover:text-rose-500"><MinusCircle className="h-5 w-5" /></button>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5">
+                      <div className="truncate text-[13.5px] font-semibold">{fund.fundName}</div>
+                      {sip && <Badge variant={sip.status === "Active" ? "success" : "warning"}>{sip.status}</Badge>}
+                    </div>
+                    <div className="mt-0.5 text-[11.5px] text-[color:var(--ink-4)]">
+                      {fund.category} · SIP {sip ? compactINR(sip.monthlyAmount) : "-"} /mo
+                    </div>
                   </div>
-                ))}
-              </div>
-            </>
-          )}
-
-          {activeSubTab === "stocks" && (
-            <div className="space-y-4">
-              {activePortfolioId === "all" && <div className="flex items-center gap-2 rounded-xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-400"><AlertTriangle className="h-4 w-4" /> Select an individual portfolio before adding or editing holdings.</div>}
-              {activePortfolio && (
-                <div className="grid grid-cols-1 gap-3 rounded-2xl border border-slate-800 bg-slate-950 p-4 md:grid-cols-4">
-                  <MiniPortfolioStat label="Portfolio" value={activePortfolio.name} helper={`${activePortfolio.ownerName} / ${activePortfolio.broker}`} />
-                  <MiniPortfolioStat label="Holdings" value={String(activePortfolio.holdings.length)} helper="Use this to check duplicates while adding" />
-                  <MiniPortfolioStat
-                    label="Invested"
-                    value={formatCurrency(activePortfolio.holdings.reduce((sum, holding) => sum + holding.quantity * holding.avgBuyPrice, 0))}
-                    helper="Current portfolio cost basis"
-                  />
-                  <MiniPortfolioStat
-                    label="Current"
-                    value={formatCurrency(activePortfolio.holdings.reduce((sum, holding) => sum + holding.quantity * holding.currentPrice, 0))}
-                    helper="Portfolio market value"
-                  />
+                  <div className="flex items-center gap-1">
+                    <button onClick={() => { setEditingItem(fund); setIsItemModalOpen(true); }} className="grid h-8 w-8 place-items-center rounded-[10px] text-[color:var(--ink-4)] hover:bg-white/[0.05]">
+                      <Icon name="pencil" size={14} />
+                    </button>
+                    <button onClick={() => removeItem(fund.id)} className="grid h-8 w-8 place-items-center rounded-[10px] text-[color:var(--ink-4)] hover:bg-white/[0.05] hover:text-[color:var(--neg)]">
+                      <Icon name="trash" size={14} />
+                    </button>
+                  </div>
                 </div>
-              )}
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                <Input label="Company Name" name="companyName" required defaultValue={editingItem?.companyName} className="md:col-span-2" />
-                <Input label="Ticker" name="ticker" required defaultValue={editingItem?.ticker} placeholder="RELIANCE" />
-                <Input label="Quantity" name="quantity" type="number" required defaultValue={editingItem?.quantity} />
-                <Input label="Avg Buy Price" name="avgBuyPrice" type="number" required defaultValue={editingItem?.avgBuyPrice} />
-                <Input label="Current Price" name="currentPrice" type="number" required defaultValue={editingItem?.currentPrice} />
-              </div>
+                <div className="flex divide-x divide-white/[0.05] px-2 pb-3">
+                  {[
+                    ["Invested", compactINR(invested), undefined],
+                    ["Current", compactINR(fund.currentValue), undefined],
+                    ["P&L", `${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%`, pct >= 0 ? "var(--pos)" : "var(--neg)"],
+                  ].map(([label, value, color], index) => (
+                    <div key={index} className="flex-1 px-2">
+                      <div className="text-[10px] uppercase tracking-wider text-[color:var(--ink-4)]">{label}</div>
+                      <div className="font-mono-num text-[13px] font-semibold tabular" style={color ? { color: color as string } : undefined}>{value}</div>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+            );
+          })}
+          {data.investments.mutualFunds.length === 0 && <Card className="py-10 text-center text-[color:var(--ink-4)]">No mutual funds yet.</Card>}
+        </div>
+      )}
+
+      {subTab === "stocks" && (
+        <div className="space-y-3">
+          <div className="flex flex-wrap gap-1.5">
+            <Button size="sm" variant={activePortfolioId === "all" ? "primary" : "secondary"} onClick={() => setActivePortfolioId("all")}>All</Button>
+            {data.investments.stockPortfolios.map((portfolio) => (
+              <Button key={portfolio.id} size="sm" variant={activePortfolioId === portfolio.id ? "primary" : "secondary"} onClick={() => setActivePortfolioId(portfolio.id)}>
+                {portfolio.name}
+              </Button>
+            ))}
+            <Button size="sm" variant="soft" onClick={() => { setEditingPortfolio(null); setIsPortfolioModalOpen(true); }} icon={<Icon name="plus" size={12} />}>
+              Portfolio
+            </Button>
+          </div>
+
+          {activePortfolioId === "all" ? (
+            <div className="space-y-2.5">
+              {stockHoldings.map((holding) => {
+                const gainLoss = holding.totalCurrentValue - holding.totalInvested;
+                const pct = holding.totalInvested > 0 ? (gainLoss / holding.totalInvested) * 100 : 0;
+                return (
+                  <Card key={holding.name}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="text-[14px] font-semibold">{holding.name}</div>
+                        <div className="mt-0.5 text-[11px] text-[color:var(--ink-4)]">{holding.tickers.join(", ")} · {holding.portfolios.join(", ")}</div>
+                      </div>
+                      <Badge variant={gainLoss >= 0 ? "success" : "danger"}>{pct >= 0 ? "+" : ""}{pct.toFixed(1)}%</Badge>
+                    </div>
+                    <div className="mt-3 grid grid-cols-3 gap-2">
+                      <StatMini label="Qty" value={String(holding.totalQty)} />
+                      <StatMini label="Invested" value={compactINR(holding.totalInvested)} />
+                      <StatMini label="Current" value={compactINR(holding.totalCurrentValue)} />
+                    </div>
+                  </Card>
+                );
+              })}
             </div>
+          ) : activePortfolio ? (
+            <div className="space-y-2.5">
+              <Card>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="font-display text-[15px] font-semibold">{activePortfolio.name}</div>
+                    <div className="text-[11.5px] text-[color:var(--ink-4)]">{activePortfolio.ownerName} · {activePortfolio.broker}</div>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button size="sm" variant="secondary" onClick={() => { setEditingPortfolio(activePortfolio); setIsPortfolioModalOpen(true); }}>Edit</Button>
+                    <Button size="sm" variant="secondary" onClick={() => { setEditingItem(null); setIsItemModalOpen(true); }}>Add holding</Button>
+                  </div>
+                </div>
+              </Card>
+
+              {activePortfolio.holdings.map((holding) => {
+                const current = holding.quantity * holding.currentPrice;
+                const invested = holding.quantity * holding.avgBuyPrice;
+                const gainLoss = current - invested;
+                const pct = invested > 0 ? (gainLoss / invested) * 100 : 0;
+                return (
+                  <Card key={holding.id}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="font-mono-num text-[13px] font-semibold">{holding.ticker}</div>
+                        <div className="text-[11px] text-[color:var(--ink-4)]">{holding.companyName}</div>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <button onClick={() => { setEditingItem(holding); setIsItemModalOpen(true); }} className="grid h-8 w-8 place-items-center rounded-[10px] text-[color:var(--ink-4)] hover:bg-white/[0.05]">
+                          <Icon name="pencil" size={14} />
+                        </button>
+                        <button onClick={() => removeItem(holding.id)} className="grid h-8 w-8 place-items-center rounded-[10px] text-[color:var(--ink-4)] hover:bg-white/[0.05] hover:text-[color:var(--neg)]">
+                          <Icon name="trash" size={14} />
+                        </button>
+                      </div>
+                    </div>
+                    <div className="mt-3 grid grid-cols-3 gap-2">
+                      <StatMini label="Qty x LTP" value={`${holding.quantity} x ${compactINR(holding.currentPrice)}`} />
+                      <StatMini label="Current" value={compactINR(current)} />
+                      <StatMini label="P&L" value={`${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%`} tone={gainLoss >= 0 ? "success" : "danger"} />
+                    </div>
+                  </Card>
+                );
+              })}
+              {activePortfolio.holdings.length === 0 && <Card className="py-10 text-center text-[color:var(--ink-4)]">No holdings in this portfolio yet.</Card>}
+            </div>
+          ) : (
+            <Card className="py-10 text-center text-[color:var(--ink-4)]">Create a stock portfolio to start tracking holdings.</Card>
           )}
+        </div>
+      )}
 
-          {activeSubTab === "fd" && <div className="grid grid-cols-1 gap-4 md:grid-cols-2"><Input label="Bank Name" name="bankName" required defaultValue={editingItem?.bankName} className="md:col-span-2" /><Input label="Principal Amount" name="principal" type="number" required defaultValue={editingItem?.principal} /><Input label="Interest Rate (%)" name="interestRate" type="number" required defaultValue={editingItem?.interestRate} /><Input label="Start Date" name="startDate" type="date" required defaultValue={editingItem?.startDate} /><Input label="Maturity Date" name="maturityDate" type="date" required defaultValue={editingItem?.maturityDate} /></div>}
+      {subTab === "fd" && (
+        <div className="space-y-2.5">
+          {data.investments.fd.map((fd) => {
+            const current = calculateFDValue(fd.principal, fd.interestRate, fd.startDate, fd.maturityDate);
+            return (
+              <Card key={fd.id}>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-[13.5px] font-semibold">{fd.bankName}</div>
+                    <div className="text-[11px] text-[color:var(--ink-4)]">{fd.startDate} {"->"} {fd.maturityDate}</div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Badge variant="warning">{fd.interestRate}% p.a.</Badge>
+                    <button onClick={() => { setEditingItem(fd); setIsItemModalOpen(true); }} className="grid h-8 w-8 place-items-center rounded-[10px] text-[color:var(--ink-4)] hover:bg-white/[0.05]"><Icon name="pencil" size={14} /></button>
+                    <button onClick={() => removeItem(fd.id)} className="grid h-8 w-8 place-items-center rounded-[10px] text-[color:var(--ink-4)] hover:bg-white/[0.05] hover:text-[color:var(--neg)]"><Icon name="trash" size={14} /></button>
+                  </div>
+                </div>
+                <div className="mt-3 flex items-end justify-between">
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wider text-[color:var(--ink-4)]">Principal</div>
+                    <div className="font-display text-[20px] font-semibold tabular">{formatCurrency(fd.principal)}</div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-[10px] uppercase tracking-wider text-[color:var(--ink-4)]">Current</div>
+                    <div className="font-mono-num text-[13px] tabular text-[color:var(--ink-2)]">{compactINR(current)}</div>
+                  </div>
+                </div>
+              </Card>
+            );
+          })}
+          {data.investments.fd.length === 0 && <Card className="py-10 text-center text-[color:var(--ink-4)]">No fixed deposits yet.</Card>}
+        </div>
+      )}
 
-          {activeSubTab === "rd" && <div className="grid grid-cols-1 gap-4 md:grid-cols-2"><Input label="Bank Name" name="bankName" required defaultValue={editingItem?.bankName} className="md:col-span-2" /><Input label="Monthly Deposit" name="monthlyDeposit" type="number" required defaultValue={editingItem?.monthlyDeposit} /><Input label="Interest Rate (%)" name="interestRate" type="number" required defaultValue={editingItem?.interestRate} /><Input label="Start Date" name="startDate" type="date" required defaultValue={editingItem?.startDate} /><Input label="Maturity Date" name="maturityDate" type="date" required defaultValue={editingItem?.maturityDate} /><Select label="Deduct From" value={rdFromAccountId} onChange={(event) => setRdFromAccountId(event.target.value)} className="md:col-span-2">{accounts.map((account) => <option key={account.id} value={account.id}>{account.bankName}</option>)}</Select>{!isCashAccount(rdFromAccountId) && <Select label="Payment Method" name="rdPaymentMethod" defaultValue={editingItem?.paymentMethod || "Net Banking"} className="md:col-span-2">{getExpenseMethods().filter((method) => method !== "Cash").map((method) => <option key={method} value={method}>{method}</option>)}</Select>}</div>}
+      {subTab === "rd" && (
+        <div className="space-y-2.5">
+          {data.investments.rd.map((rd) => {
+            const current = calculateRDValue(rd.monthlyDeposit, rd.interestRate, rd.startDate, rd.maturityDate);
+            const invested = calculateRDInvested(rd.monthlyDeposit, rd.startDate, rd.maturityDate);
+            return (
+              <Card key={rd.id}>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-[13.5px] font-semibold">{rd.bankName}</div>
+                    <div className="text-[11px] text-[color:var(--ink-4)]">{rd.startDate} {"->"} {rd.maturityDate}</div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Badge variant="warning">{rd.interestRate}% p.a.</Badge>
+                    <button onClick={() => { setEditingItem(rd); setIsItemModalOpen(true); }} className="grid h-8 w-8 place-items-center rounded-[10px] text-[color:var(--ink-4)] hover:bg-white/[0.05]"><Icon name="pencil" size={14} /></button>
+                    <button onClick={() => removeItem(rd.id)} className="grid h-8 w-8 place-items-center rounded-[10px] text-[color:var(--ink-4)] hover:bg-white/[0.05] hover:text-[color:var(--neg)]"><Icon name="trash" size={14} /></button>
+                  </div>
+                </div>
+                <div className="mt-3 grid grid-cols-3 gap-2">
+                  <StatMini label="Monthly" value={compactINR(rd.monthlyDeposit)} />
+                  <StatMini label="Invested" value={compactINR(invested)} />
+                  <StatMini label="Current" value={compactINR(current)} />
+                </div>
+              </Card>
+            );
+          })}
+          {data.investments.rd.length === 0 && <Card className="py-10 text-center text-[color:var(--ink-4)]">No recurring deposits yet.</Card>}
+        </div>
+      )}
 
-          <div className="flex gap-3 pt-4">
-            <Button type="submit" className="flex-1" disabled={activeSubTab === "stocks" && activePortfolioId === "all"}>{editingItem ? "Update Investment" : "Add Investment"}</Button>
-            <Button type="button" variant="secondary" onClick={() => setIsModalOpen(false)}>Cancel</Button>
-          </div>
-        </form>
-      </Modal>
+      <InvestmentItemModal
+        open={isItemModalOpen}
+        onClose={() => { setIsItemModalOpen(false); setEditingItem(null); }}
+        subTab={subTab}
+        data={data}
+        updateData={updateData}
+        editingItem={editingItem}
+        activePortfolio={activePortfolio}
+        accounts={accounts}
+      />
 
-      <Modal isOpen={isPortfolioModalOpen} onClose={() => { setIsPortfolioModalOpen(false); setEditingPortfolio(null); }} title={editingPortfolio ? "Edit Portfolio" : "Create Portfolio"}>
-        <form onSubmit={handlePortfolioSubmit} className="space-y-4">
-          <Input label="Portfolio Name" name="name" required defaultValue={editingPortfolio?.name} />
-          <Input label="Owner Name" name="ownerName" required defaultValue={editingPortfolio?.ownerName} />
-          <Select label="Broker" name="broker" defaultValue={editingPortfolio?.broker || "Groww"}>
-            {["Groww", "Zerodha", "Upstox", "Other"].map((broker) => <option key={broker} value={broker}>{broker}</option>)}
-          </Select>
-          <div className="flex gap-3 pt-4">
-            <Button type="submit" className="flex-1">{editingPortfolio ? "Update Portfolio" : "Create Portfolio"}</Button>
-            <Button type="button" variant="secondary" onClick={() => setIsPortfolioModalOpen(false)}>Cancel</Button>
-          </div>
-        </form>
-      </Modal>
+      <PortfolioModal
+        open={isPortfolioModalOpen}
+        onClose={() => { setIsPortfolioModalOpen(false); setEditingPortfolio(null); }}
+        editingPortfolio={editingPortfolio}
+        data={data}
+        updateData={updateData}
+        onSaved={(id) => setActivePortfolioId(id)}
+      />
     </div>
   );
 }
 
-function CompactSummaryCard({
+function StatMini({
   label,
   value,
-  helper,
-  tone = "neutral",
+  tone,
 }: {
   label: string;
   value: string;
-  helper: string;
-  tone?: "neutral" | "positive" | "negative";
+  tone?: "success" | "danger";
 }) {
   return (
-    <div className={`rounded-2xl border px-4 py-4 ${
-      tone === "positive"
-        ? "border-emerald-500/20 bg-emerald-500/5"
-        : tone === "negative"
-          ? "border-rose-500/20 bg-rose-500/5"
-          : "border-slate-800 bg-slate-950"
-    }`}>
-      <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{label}</div>
-      <div className="mt-2 text-xl font-bold text-slate-100">{value}</div>
-      <div className="mt-1 text-xs text-slate-500">{helper}</div>
+    <div className="rounded-[12px] bg-[color:var(--bg-3)] px-3 py-2 hairline">
+      <div className="text-[10px] uppercase tracking-wider text-[color:var(--ink-4)]">{label}</div>
+      <div className="font-mono-num text-[13px] font-semibold tabular" style={tone ? { color: tone === "success" ? "var(--pos)" : "var(--neg)" } : undefined}>{value}</div>
     </div>
   );
 }
 
-function MiniPortfolioStat({ label, value, helper }: { label: string; value: string; helper: string }) {
+function InvestmentItemModal({
+  open,
+  onClose,
+  subTab,
+  data,
+  updateData,
+  editingItem,
+  activePortfolio,
+  accounts,
+}: {
+  open: boolean;
+  onClose: () => void;
+  subTab: InvestmentTab;
+  data: PortfolioData;
+  updateData: (d: Partial<PortfolioData>) => void;
+  editingItem: any;
+  activePortfolio: StockPortfolio | null;
+  accounts: ReturnType<typeof getAllAccounts>;
+}) {
+  const stockPortfolios = data.investments.stockPortfolios;
+
+  if (!open) return null;
+
   return (
-    <div className="rounded-xl border border-slate-800 px-3 py-3">
-      <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">{label}</div>
-      <div className="mt-1 truncate text-sm font-semibold text-slate-100">{value}</div>
-      <div className="mt-1 text-xs text-slate-500">{helper}</div>
-    </div>
+    <Modal isOpen={open} onClose={onClose} title={editingItem ? "Edit Investment" : "Add Investment"} className="max-w-3xl">
+      {subTab === "mf" && (
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            const formData = new FormData(event.currentTarget);
+            const id = editingItem?.id || Date.now().toString();
+            const sipAmount = Number(formData.get("sipAmount") || 0);
+            const lumpsumAmount = Number(formData.get("lumpsumAmount") || 0);
+            const fund: MutualFund = {
+              id,
+              fundName: String(formData.get("fundName")),
+              amc: String(formData.get("amc")),
+              category: formData.get("category") as MFCategory,
+              currentValue: Number(formData.get("currentValue")),
+              lumpsumEntries: lumpsumAmount > 0 ? [{ id: `${id}_lump`, date: String(formData.get("lumpsumDate") || new Date().toISOString().slice(0, 10)), amount: lumpsumAmount }] : [],
+              sipDetails: sipAmount > 0 ? {
+                monthlyAmount: sipAmount,
+                startDate: String(formData.get("sipStartDate") || new Date().toISOString().slice(0, 10)),
+                status: "Active",
+                fromAccountId: String(formData.get("sipAccountId") || "") || null,
+                fromAccountName: accounts.find((account) => account.id === String(formData.get("sipAccountId")) )?.bankName || null,
+                paymentMethod: "Net Banking",
+              } : undefined,
+              createdAt: editingItem?.createdAt || new Date().toISOString(),
+            };
+
+            updateData({
+              investments: {
+                ...data.investments,
+                mutualFunds: editingItem
+                  ? data.investments.mutualFunds.map((item) => item.id === id ? fund : item)
+                  : [...data.investments.mutualFunds, fund],
+              },
+            });
+            onClose();
+          }}
+          className="space-y-4"
+        >
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <Input label="Fund Name" name="fundName" required defaultValue={editingItem?.fundName} className="md:col-span-2" />
+            <Input label="AMC" name="amc" required defaultValue={editingItem?.amc} />
+            <Select label="Category" name="category" defaultValue={editingItem?.category || "Equity"}>
+              {["Equity", "Debt", "Hybrid", "ELSS", "Index"].map((category) => <option key={category} value={category}>{category}</option>)}
+            </Select>
+            <Input label="Current Value" name="currentValue" type="number" required defaultValue={editingItem?.currentValue} className="md:col-span-2" />
+            <Input label="Lumpsum Amount" name="lumpsumAmount" type="number" defaultValue={editingItem ? editingItem.lumpsumEntries?.reduce((sum: number, entry: any) => sum + entry.amount, 0) : ""} />
+            <Input label="Lumpsum Date" name="lumpsumDate" type="date" defaultValue={editingItem?.lumpsumEntries?.[0]?.date || new Date().toISOString().slice(0, 10)} />
+            <Input label="SIP Amount" name="sipAmount" type="number" defaultValue={editingItem?.sipDetails?.monthlyAmount || ""} />
+            <Input label="SIP Start Date" name="sipStartDate" type="date" defaultValue={editingItem?.sipDetails?.startDate || new Date().toISOString().slice(0, 10)} />
+            <Select label="SIP Account" name="sipAccountId" defaultValue={editingItem?.sipDetails?.fromAccountId || accounts[0]?.id || ""} className="md:col-span-2">
+              {accounts.map((account) => <option key={account.id} value={account.id}>{account.bankName}</option>)}
+            </Select>
+          </div>
+          <div className="flex gap-3 pt-2">
+            <Button type="submit" block>{editingItem ? "Update" : "Add"}</Button>
+            <Button type="button" variant="secondary" onClick={onClose}>Cancel</Button>
+          </div>
+        </form>
+      )}
+
+      {subTab === "stocks" && stockPortfolios.length > 0 && (
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            const formData = new FormData(event.currentTarget);
+            const id = editingItem?.id || Date.now().toString();
+            const targetPortfolioId = String(formData.get("portfolioId") || activePortfolio?.id || stockPortfolios[0]?.id || "");
+            const targetPortfolio = stockPortfolios.find((portfolio) => portfolio.id === targetPortfolioId);
+            if (!targetPortfolio) return;
+            const quantity = Number(formData.get("quantity"));
+            const avgBuyPrice = Number(formData.get("avgBuyPrice"));
+            const currentPrice = Number(formData.get("currentPrice"));
+            const stock: Stock = {
+              id,
+              companyName: String(formData.get("companyName")),
+              ticker: String(formData.get("ticker")).toUpperCase(),
+              quantity,
+              avgBuyPrice,
+              currentPrice,
+            };
+
+            let nextHoldings = editingItem
+              ? targetPortfolio.holdings.map((item) => item.id === id ? stock : item)
+              : [...targetPortfolio.holdings, stock];
+
+            if (!editingItem) {
+              const duplicate = targetPortfolio.holdings.find((item) => item.companyName.toLowerCase() === stock.companyName.toLowerCase());
+              if (duplicate) {
+                nextHoldings = targetPortfolio.holdings.map((item) =>
+                  item.id === duplicate.id
+                    ? {
+                        ...item,
+                        quantity: item.quantity + quantity,
+                        avgBuyPrice: calculateWeightedAverage(item.quantity, item.avgBuyPrice, quantity, avgBuyPrice),
+                        currentPrice,
+                      }
+                    : item,
+                );
+              }
+            }
+
+            updateData({
+              investments: {
+                ...data.investments,
+                stockPortfolios: data.investments.stockPortfolios.map((portfolio) =>
+                  portfolio.id === targetPortfolio.id ? { ...portfolio, holdings: nextHoldings } : portfolio,
+                ),
+              },
+            });
+            onClose();
+          }}
+          className="space-y-4"
+        >
+          <div className="rounded-[14px] bg-[color:var(--bg-3)] px-4 py-3 text-sm text-[color:var(--ink-3)] hairline">
+            {editingItem
+              ? `Editing holding in ${activePortfolio?.name || "portfolio"}`
+              : `Add a holding to ${activePortfolio?.name || "one of your portfolios"}`}
+          </div>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            {!editingItem && (
+              <Select label="Portfolio" name="portfolioId" defaultValue={activePortfolio?.id || stockPortfolios[0]?.id || ""} className="md:col-span-2">
+                {stockPortfolios.map((portfolio) => <option key={portfolio.id} value={portfolio.id}>{portfolio.name}</option>)}
+              </Select>
+            )}
+            <Input label="Company Name" name="companyName" required defaultValue={editingItem?.companyName} className="md:col-span-2" />
+            <Input label="Ticker" name="ticker" required defaultValue={editingItem?.ticker} />
+            <Input label="Quantity" name="quantity" type="number" required defaultValue={editingItem?.quantity} />
+            <Input label="Avg Buy Price" name="avgBuyPrice" type="number" required defaultValue={editingItem?.avgBuyPrice} />
+            <Input label="Current Price" name="currentPrice" type="number" required defaultValue={editingItem?.currentPrice} />
+          </div>
+          <div className="flex gap-3 pt-2">
+            <Button type="submit" block>{editingItem ? "Update" : "Add"}</Button>
+            <Button type="button" variant="secondary" onClick={onClose}>Cancel</Button>
+          </div>
+        </form>
+      )}
+
+      {(subTab === "fd" || subTab === "rd") && (
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            const formData = new FormData(event.currentTarget);
+            const id = editingItem?.id || Date.now().toString();
+
+            if (subTab === "fd") {
+              const fd: FixedDeposit = {
+                id,
+                bankName: String(formData.get("bankName")),
+                principal: Number(formData.get("principal")),
+                interestRate: Number(formData.get("interestRate")),
+                startDate: String(formData.get("startDate")),
+                maturityDate: String(formData.get("maturityDate")),
+                fromAccountId: null,
+                fromAccountName: null,
+                createdAt: editingItem?.createdAt || new Date().toISOString(),
+              };
+              updateData({
+                investments: {
+                  ...data.investments,
+                  fd: editingItem ? data.investments.fd.map((item) => item.id === id ? fd : item) : [...data.investments.fd, fd],
+                },
+              });
+            } else {
+              const accountId = String(formData.get("fromAccountId") || "") || null;
+              const rd: RecurringDeposit = {
+                id,
+                bankName: String(formData.get("bankName")),
+                monthlyDeposit: Number(formData.get("monthlyDeposit")),
+                interestRate: Number(formData.get("interestRate")),
+                startDate: String(formData.get("startDate")),
+                maturityDate: String(formData.get("maturityDate")),
+                fromAccountId: accountId,
+                fromAccountName: accounts.find((account) => account.id === accountId)?.bankName || null,
+                paymentMethod: "Net Banking",
+                createdAt: editingItem?.createdAt || new Date().toISOString(),
+              };
+              updateData({
+                investments: {
+                  ...data.investments,
+                  rd: editingItem ? data.investments.rd.map((item) => item.id === id ? rd : item) : [...data.investments.rd, rd],
+                },
+              });
+            }
+            onClose();
+          }}
+          className="space-y-4"
+        >
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <Input label="Bank Name" name="bankName" required defaultValue={editingItem?.bankName} className="md:col-span-2" />
+            <Input label={subTab === "fd" ? "Principal" : "Monthly Deposit"} name={subTab === "fd" ? "principal" : "monthlyDeposit"} type="number" required defaultValue={subTab === "fd" ? editingItem?.principal : editingItem?.monthlyDeposit} />
+            <Input label="Interest Rate (%)" name="interestRate" type="number" required defaultValue={editingItem?.interestRate} />
+            <Input label="Start Date" name="startDate" type="date" required defaultValue={editingItem?.startDate || new Date().toISOString().slice(0, 10)} />
+            <Input label="Maturity Date" name="maturityDate" type="date" required defaultValue={editingItem?.maturityDate} />
+            {subTab === "rd" && (
+              <Select label="From Account" name="fromAccountId" defaultValue={editingItem?.fromAccountId || accounts[0]?.id || ""} className="md:col-span-2">
+                {accounts.map((account) => <option key={account.id} value={account.id}>{account.bankName}</option>)}
+              </Select>
+            )}
+          </div>
+          <div className="flex gap-3 pt-2">
+            <Button type="submit" block>{editingItem ? "Update" : "Add"}</Button>
+            <Button type="button" variant="secondary" onClick={onClose}>Cancel</Button>
+          </div>
+        </form>
+      )}
+    </Modal>
   );
 }
 
-function ActionButtons({ onEdit, onDelete }: { onEdit: () => void; onDelete: () => void }) {
+function PortfolioModal({
+  open,
+  onClose,
+  editingPortfolio,
+  data,
+  updateData,
+  onSaved,
+}: {
+  open: boolean;
+  onClose: () => void;
+  editingPortfolio: StockPortfolio | null;
+  data: PortfolioData;
+  updateData: (d: Partial<PortfolioData>) => void;
+  onSaved: (id: string) => void;
+}) {
   return (
-    <div className="flex items-center gap-2">
-      <button onClick={onEdit} className="p-2 text-slate-400 hover:text-emerald-500"><Edit2 className="h-4 w-4" /></button>
-      <button onClick={onDelete} className="p-2 text-slate-400 hover:text-rose-500"><Trash2 className="h-4 w-4" /></button>
-    </div>
+    <Modal isOpen={open} onClose={onClose} title={editingPortfolio ? "Edit Portfolio" : "Create Portfolio"}>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          const formData = new FormData(event.currentTarget);
+          const id = editingPortfolio?.id || `portfolio_${Date.now()}`;
+          const portfolio: StockPortfolio = {
+            id,
+            name: String(formData.get("name")),
+            ownerName: String(formData.get("ownerName")),
+            broker: formData.get("broker") as BrokerType,
+            holdings: editingPortfolio?.holdings || [],
+          };
+          updateData({
+            investments: {
+              ...data.investments,
+              stockPortfolios: editingPortfolio
+                ? data.investments.stockPortfolios.map((item) => item.id === id ? portfolio : item)
+                : [...data.investments.stockPortfolios, portfolio],
+            },
+          });
+          onSaved(id);
+          onClose();
+        }}
+        className="space-y-4"
+      >
+        <Input label="Portfolio Name" name="name" required defaultValue={editingPortfolio?.name} />
+        <Input label="Owner Name" name="ownerName" required defaultValue={editingPortfolio?.ownerName} />
+        <Select label="Broker" name="broker" defaultValue={editingPortfolio?.broker || "Groww"}>
+          {["Groww", "Zerodha", "Upstox", "Other"].map((broker) => <option key={broker} value={broker}>{broker}</option>)}
+        </Select>
+        <div className="flex gap-3 pt-2">
+          <Button type="submit" block>{editingPortfolio ? "Update" : "Create"}</Button>
+          <Button type="button" variant="secondary" onClick={onClose}>Cancel</Button>
+        </div>
+      </form>
+    </Modal>
   );
 }

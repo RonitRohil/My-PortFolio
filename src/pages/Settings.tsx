@@ -1,14 +1,28 @@
-import React, { useMemo, useState } from "react";
+import React, { useState } from "react";
 import initSqlJs from "sql.js";
 import sqlWasmUrl from "sql.js/dist/sql-wasm.wasm?url";
-import { CategoryDefinition, PortfolioData, ExpenseCategory, IncomeSource, PaymentMethod } from "../types";
-import { Badge, Button, Card, Input, Modal, Select, Table } from "../components/UI";
-import { AlertTriangle, Download, Edit2, FileJson, FileSpreadsheet, Plus, Settings2, Trash2, Upload } from "lucide-react";
+import {
+  CategoryDefinition,
+  PortfolioData,
+  ExpenseCategory,
+  IncomeSource,
+  PaymentMethod,
+} from "../types";
+import {
+  Badge,
+  Button,
+  Card,
+  Input,
+  Modal,
+  Select,
+  Sheet,
+} from "../components/UI";
 import {
   getAllAccounts,
   getCategoryDisplayPath,
   mergeImportedCategories,
 } from "../lib/utils";
+import Icon from "../components/Icon";
 import { normalizeStockName } from "../utils/stockNormalizer";
 
 type ImportSummary = {
@@ -65,14 +79,29 @@ const incomeCategoryMap: Record<string, IncomeSource> = {
   "existing balance": "Other",
 };
 
-const expenseCategoryKeywords: { match: RegExp; category: ExpenseCategory }[] = [
-  { match: /(food|grocery|restaurant)/i, category: "Food" },
-  { match: /(rent|house)/i, category: "Rent" },
-  { match: /(medical|health|hospital|medicine)/i, category: "Medical" },
-  { match: /(travel|transport|petrol|auto|cab)/i, category: "Travel" },
-  { match: /(entertainment|movie|ott)/i, category: "Entertainment" },
-  { match: /(utility|electric|internet|mobile|recharge)/i, category: "Utilities" },
-];
+const expenseCategoryKeywords: { match: RegExp; category: ExpenseCategory }[] =
+  [
+    { match: /(food|grocery|restaurant)/i, category: "Food" },
+    { match: /(rent|house)/i, category: "Rent" },
+    { match: /(medical|health|hospital|medicine)/i, category: "Medical" },
+    { match: /(travel|transport|petrol|auto|cab)/i, category: "Travel" },
+    { match: /(entertainment|movie|ott)/i, category: "Entertainment" },
+    {
+      match: /(utility|electric|internet|mobile|recharge)/i,
+      category: "Utilities",
+    },
+  ];
+
+function compactINR(amount: number) {
+  const abs = Math.abs(amount);
+  const sign = amount < 0 ? "-" : "";
+  if (abs >= 1e7)
+    return `${sign}Rs${(abs / 1e7).toFixed(abs >= 1e8 ? 1 : 2)} Cr`;
+  if (abs >= 1e5)
+    return `${sign}Rs${(abs / 1e5).toFixed(abs >= 1e6 ? 1 : 2)} L`;
+  if (abs >= 1e3) return `${sign}Rs${(abs / 1e3).toFixed(1)}k`;
+  return `${sign}Rs${abs.toFixed(0)}`;
+}
 
 export default function Settings({
   data,
@@ -85,15 +114,30 @@ export default function Settings({
   setActiveTab: (tab: string) => void;
   clearAllData: () => Promise<void>;
 }) {
-  const [importSummary, setImportSummary] = useState<ImportSummary | null>(null);
-  const [pendingImport, setPendingImport] = useState<PendingMyMoneyImport | null>(null);
-  const [accountMappings, setAccountMappings] = useState<Record<string, string>>({});
-  const [categoryEditor, setCategoryEditor] = useState<CategoryEditorState | null>(null);
+  const [importSummary, setImportSummary] = useState<ImportSummary | null>(
+    null,
+  );
+  const [pendingImport, setPendingImport] =
+    useState<PendingMyMoneyImport | null>(null);
+  const [accountMappings, setAccountMappings] = useState<
+    Record<string, string>
+  >({});
+  const [categoryEditor, setCategoryEditor] =
+    useState<CategoryEditorState | null>(null);
   const incomeCategories = data.settings?.incomeCategories || [];
   const expenseCategories = data.settings?.expenseCategories || [];
+  const accountCount = getAllAccounts(data).length;
+  const totalRecords =
+    data.income.length +
+    data.expenses.length +
+    data.transfers.length +
+    data.loans.length;
+  const totalCategories = incomeCategories.length + expenseCategories.length;
 
   const exportToJson = () => {
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const blob = new Blob([JSON.stringify(data, null, 2)], {
+      type: "application/json",
+    });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
@@ -152,7 +196,9 @@ export default function Settings({
     URL.revokeObjectURL(url);
   };
 
-  const handleMyMoneyImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleMyMoneyImport = async (
+    event: React.ChangeEvent<HTMLInputElement>,
+  ) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
@@ -164,7 +210,10 @@ export default function Settings({
       const db = new SQL.Database(new Uint8Array(buffer));
 
       const accountRows = queryRows(db, "SELECT uid, NIC_NAME FROM ASSETS;");
-      const categoryRows = queryRows(db, "SELECT uid, NAME, TYPE, pUid FROM ZCATEGORY WHERE C_IS_DEL = 0;");
+      const categoryRows = queryRows(
+        db,
+        "SELECT uid, NAME, TYPE, pUid FROM ZCATEGORY WHERE C_IS_DEL = 0;",
+      );
       const transactionRows = queryRows(
         db,
         `SELECT uid, assetUid, ctgUid, ZCONTENT, ZDATE, DO_TYPE, ZMONEY, ASSET_NIC, CATEGORY_NAME
@@ -173,13 +222,24 @@ export default function Settings({
          ORDER BY ZDATE ASC;`,
       );
 
-      const accountLookup = Object.fromEntries(accountRows.map((row) => [row.uid, row.NIC_NAME]));
-      const categories = Object.fromEntries(categoryRows.map((row) => [row.uid, row]));
+      const accountLookup = Object.fromEntries(
+        accountRows.map((row) => [row.uid, row.NIC_NAME]),
+      );
+      const categories = Object.fromEntries(
+        categoryRows.map((row) => [row.uid, row]),
+      );
       const myMoneyAccounts: string[] = Array.from(
-        new Set(accountRows.map((row) => normalizeAccountName(String(row.NIC_NAME || ""))).filter(Boolean)),
+        new Set(
+          accountRows
+            .map((row) => normalizeAccountName(String(row.NIC_NAME || "")))
+            .filter(Boolean),
+        ),
       ) as string[];
       const initialMappings = Object.fromEntries(
-        myMoneyAccounts.map((accountName) => [accountName, getDefaultImportMapping(accountName, data)]),
+        myMoneyAccounts.map((accountName) => [
+          accountName,
+          getDefaultImportMapping(accountName, data),
+        ]),
       );
       setAccountMappings(initialMappings);
       setPendingImport({
@@ -208,22 +268,30 @@ export default function Settings({
     let investmentSkippedCount = 0;
     let invalidSkippedCount = 0;
     let unmatchedSkippedCount = 0;
-    const importedCategories = extractImportedCategories(pendingImport.categoryRows);
+    const importedCategories = extractImportedCategories(
+      pendingImport.categoryRows,
+    );
     const importedIncome: PortfolioData["income"] = [];
     const importedExpenses: PortfolioData["expenses"] = [];
 
     pendingImport.transactionRows.forEach((row) => {
-      const sourceAccountName = normalizeAccountName(pendingImport.accountLookup[row.assetUid] || row.ASSET_NIC || "");
+      const sourceAccountName = normalizeAccountName(
+        pendingImport.accountLookup[row.assetUid] || row.ASSET_NIC || "",
+      );
       const mappedAccountId = accountMappings[sourceAccountName] || "";
       if (!mappedAccountId || mappedAccountId === "skip") {
         investmentSkippedCount += 1;
         return;
       }
 
-      const mappedAccount = getAllAccounts(data).find((account) => account.id === mappedAccountId);
+      const mappedAccount = getAllAccounts(data).find(
+        (account) => account.id === mappedAccountId,
+      );
       const category = pendingImport.categoryRows[row.ctgUid];
       const categoryType = Number(category?.TYPE ?? NaN);
-      const categoryName = String(category?.NAME || row.CATEGORY_NAME || "").trim();
+      const categoryName = String(
+        category?.NAME || row.CATEGORY_NAME || "",
+      ).trim();
       const description = String(row.ZCONTENT || "").trim();
       const amount = Number(row.ZMONEY);
       const timestamp = Number(row.ZDATE);
@@ -236,16 +304,21 @@ export default function Settings({
 
       const date = new Date(timestamp).toISOString().slice(0, 10);
 
-      const categoryLabel = getImportedCategoryLabel(category, pendingImport.categoryRows) || categoryName || description;
+      const categoryLabel =
+        getImportedCategoryLabel(category, pendingImport.categoryRows) ||
+        categoryName ||
+        description;
 
       if (doType === 0 || categoryType === 2) {
         incomeCount += 1;
         importedIncome.push({
           id: `mymoney_${row.uid}`,
           date,
-          source: categoryLabel || mapIncomeCategory(categoryName || description),
+          source:
+            categoryLabel || mapIncomeCategory(categoryName || description),
           amount,
-          description: description || sourceAccountName || "Imported from myMoney",
+          description:
+            description || sourceAccountName || "Imported from myMoney",
           toAccountId: mappedAccountId,
           toAccountName: mappedAccount?.bankName || sourceAccountName,
         });
@@ -257,7 +330,8 @@ export default function Settings({
         importedExpenses.push({
           id: `mymoney_${row.uid}`,
           date,
-          category: categoryLabel || mapExpenseCategory(categoryName || description),
+          category:
+            categoryLabel || mapExpenseCategory(categoryName || description),
           amount,
           fromAccountId: mappedAccountId,
           fromAccountName: mappedAccount?.bankName || sourceAccountName,
@@ -270,14 +344,21 @@ export default function Settings({
       unmatchedSkippedCount += 1;
     });
 
-    const skippedCount = investmentSkippedCount + invalidSkippedCount + unmatchedSkippedCount;
+    const skippedCount =
+      investmentSkippedCount + invalidSkippedCount + unmatchedSkippedCount;
     updateData({
       income: mergeImportedEntries(data.income, importedIncome),
       expenses: mergeImportedEntries(data.expenses, importedExpenses),
       settings: {
         ...data.settings,
-        incomeCategories: mergeImportedCategories(incomeCategories, importedCategories.income),
-        expenseCategories: mergeImportedCategories(expenseCategories, importedCategories.expense),
+        incomeCategories: mergeImportedCategories(
+          incomeCategories,
+          importedCategories.income,
+        ),
+        expenseCategories: mergeImportedCategories(
+          expenseCategories,
+          importedCategories.expense,
+        ),
       },
     });
     setPendingImport(null);
@@ -293,8 +374,13 @@ export default function Settings({
     });
   };
 
-  const handleSaveCategory = (nextCategory: CategoryDefinition, previousCategory?: CategoryDefinition | null) => {
-    updateData(applyCategoryUpsert(data, nextCategory, previousCategory || null));
+  const handleSaveCategory = (
+    nextCategory: CategoryDefinition,
+    previousCategory?: CategoryDefinition | null,
+  ) => {
+    updateData(
+      applyCategoryUpsert(data, nextCategory, previousCategory || null),
+    );
     setCategoryEditor(null);
   };
 
@@ -303,237 +389,445 @@ export default function Settings({
       category,
       category.type === "income" ? incomeCategories : expenseCategories,
     );
-    if (!confirm(`Delete "${label}"? Linked transactions will be moved to Other.`)) return;
+    if (
+      !confirm(`Delete "${label}"? Linked transactions will be moved to Other.`)
+    )
+      return;
     updateData(applyCategoryDelete(data, category));
   };
 
   return (
-    <div className="space-y-8">
-      <div>
-        <h2 className="text-3xl font-bold text-slate-100">Data Management</h2>
-        <p className="text-slate-400">Import, export, tune app behaviour, and keep local data healthy.</p>
-      </div>
+    <div className="space-y-4 px-4 pt-4 pb-8 lg:px-0">
+      <Card className="relative overflow-hidden">
+        <div
+          className="absolute inset-0 opacity-80"
+          style={{
+            background:
+              "radial-gradient(120% 90% at 100% 0%, color-mix(in oklch, var(--accent) 18%, transparent), transparent 60%)",
+          }}
+        />
+        <div className="relative">
+          <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+            <div className="flex items-start gap-3">
+              <div
+                className="grid h-14 w-14 place-items-center rounded-[18px] font-display text-[18px] font-semibold"
+                style={{
+                  background:
+                    "color-mix(in oklch, var(--accent) 18%, transparent)",
+                  color: "var(--accent)",
+                  boxShadow:
+                    "inset 0 0 0 1px color-mix(in oklch, var(--accent) 40%, transparent)",
+                }}
+              >
+                RS
+              </div>
+              <div>
+                <div className="text-[10.5px] font-semibold uppercase tracking-[0.12em] text-[color:var(--ink-4)]">
+                  Preferences
+                </div>
+                <div className="mt-1 font-display text-[24px] font-semibold">
+                  Your finance workspace
+                </div>
+                <div className="mt-1 max-w-xl text-[12.5px] text-[color:var(--ink-3)]">
+                  Control budgets, imports, exports, and category structure from
+                  one place while keeping everything local to this browser.
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Badge variant="success">Local-first</Badge>
+                  <Badge variant="info">Backup ready</Badge>
+                  <Badge variant="secondary">{accountCount} accounts</Badge>
+                </div>
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-2 md:min-w-[290px]">
+              <ProfileMetric
+                label="Categories"
+                value={String(totalCategories)}
+              />
+              <ProfileMetric
+                label="Budget"
+                value={compactINR(data.settings.monthlyBudget || 0)}
+              />
+              <ProfileMetric label="Records" value={String(totalRecords)} />
+            </div>
+          </div>
+        </div>
+      </Card>
 
-      <div className="grid grid-cols-1 gap-8">
-        <Card title="Budget & Reporting" subtitle="Controls for monthly budget and yearly view mode.">
-          <div className="space-y-4">
-            <Input
-              label="Monthly Budget Limit (INR)"
-              type="number"
-              defaultValue={data.settings.monthlyBudget}
-              onChange={(event) =>
-                updateData({
-                  settings: {
-                    ...data.settings,
-                    monthlyBudget: Number(event.target.value),
-                  },
-                })
-              }
-            />
-            <Select
-              label="Year View"
-              value={data.settings.yearView}
-              onChange={(event) =>
-                updateData({
-                  settings: {
-                    ...data.settings,
-                    yearView: event.target.value as PortfolioData["settings"]["yearView"],
-                  },
-                })
-              }
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1.05fr_1fr]">
+        <Card
+          title="App Settings"
+          subtitle="Budget, reporting mode, and category structure."
+        >
+          <div className="space-y-3">
+            <SettingRow
+              icon="wallet"
+              label="Monthly budget"
+              description="Used for dashboard pacing and monthly spend tracking."
             >
-              <option value="calendar">Calendar Year (Jan-Dec)</option>
-              <option value="financial">Financial Year (Apr-Mar)</option>
-            </Select>
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-              <div className="rounded-2xl border border-slate-800 bg-slate-950 p-4">
-                <div className="text-sm font-semibold text-slate-200">Income Categories</div>
-                <div className="mt-2 text-xs text-slate-400">
-                  {incomeCategories.filter((item) => !item.parentId).length} top-level, {incomeCategories.filter((item) => item.parentId).length} subcategories
-                </div>
+              <div className="w-full md:w-[220px]">
+                <Input
+                  type="number"
+                  value={String(data.settings.monthlyBudget ?? 0)}
+                  onChange={(event) =>
+                    updateData({
+                      settings: {
+                        ...data.settings,
+                        monthlyBudget: Number(event.target.value) || 0,
+                      },
+                    })
+                  }
+                />
               </div>
-              <div className="rounded-2xl border border-slate-800 bg-slate-950 p-4">
-                <div className="text-sm font-semibold text-slate-200">Expense Categories</div>
-                <div className="mt-2 text-xs text-slate-400">
-                  {expenseCategories.filter((item) => !item.parentId).length} top-level, {expenseCategories.filter((item) => item.parentId).length} subcategories
-                </div>
+            </SettingRow>
+
+            <SettingRow
+              icon="calendar"
+              label="Year view"
+              description="Switch analytics between calendar and financial year."
+            >
+              <div className="w-full md:w-[220px]">
+                <Select
+                  value={data.settings.yearView}
+                  onChange={(event) =>
+                    updateData({
+                      settings: {
+                        ...data.settings,
+                        yearView: event.target
+                          .value as PortfolioData["settings"]["yearView"],
+                      },
+                    })
+                  }
+                >
+                  <option value="calendar">Calendar Year</option>
+                  <option value="financial">Financial Year</option>
+                </Select>
               </div>
+            </SettingRow>
+
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              <MiniPanel
+                title="Expense categories"
+                subtitle={`${expenseCategories.filter((item) => !item.parentId).length} top-level • ${expenseCategories.filter((item) => item.parentId).length} nested`}
+                tone="var(--warn)"
+              />
+              <MiniPanel
+                title="Income categories"
+                subtitle={`${incomeCategories.filter((item) => !item.parentId).length} top-level • ${incomeCategories.filter((item) => item.parentId).length} nested`}
+                tone="var(--pos)"
+              />
             </div>
           </div>
         </Card>
-      </div>
 
-      <div className="grid grid-cols-1 gap-6 md:grid-cols-2 2xl:grid-cols-4">
-        <Card className="flex h-full flex-col items-center p-8 text-center">
-          <div className="rounded-full bg-blue-500/10 p-4">
-            <FileJson className="h-8 w-8 text-blue-500" />
-          </div>
-          <h4 className="mt-4 font-bold">Full Backup</h4>
-          <p className="mt-2 text-xs text-slate-500">Export the full local dataset as JSON.</p>
-          <div className="mt-auto w-full pt-6">
-            <Button onClick={exportToJson} variant="secondary" className="w-full">
-              <Download className="h-4 w-4" /> Export JSON
-            </Button>
-          </div>
-        </Card>
+        <Card
+          title="Data Tools"
+          subtitle="Backup, restore, export, and import utilities."
+        >
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <ActionTile
+              icon="download"
+              title="Full backup"
+              description="Export your entire local dataset as JSON."
+              action={
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  block
+                  onClick={exportToJson}
+                >
+                  Export JSON
+                </Button>
+              }
+            />
 
-        <Card className="flex h-full flex-col items-center p-8 text-center">
-          <div className="rounded-full bg-emerald-500/10 p-4">
-            <Upload className="h-8 w-8 text-emerald-500" />
-          </div>
-          <h4 className="mt-4 font-bold">Restore Backup</h4>
-          <p className="mt-2 text-xs text-slate-500">Import a previous JSON export and replace current data.</p>
-          <div className="mt-auto w-full pt-6">
-            <label className="w-full">
-              <div className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-800 px-4 py-2 font-semibold text-slate-200 transition hover:bg-slate-700">
-                <Upload className="h-4 w-4" /> Import JSON
-              </div>
-              <input type="file" accept=".json" onChange={importFromJson} className="hidden" />
-            </label>
-          </div>
-        </Card>
-
-        <Card className="flex h-full flex-col items-center p-8 text-center">
-          <div className="rounded-full bg-amber-500/10 p-4">
-            <FileSpreadsheet className="h-8 w-8 text-amber-500" />
-          </div>
-          <h4 className="mt-4 font-bold">CSV Exports</h4>
-          <p className="mt-2 text-xs text-slate-500">Export investments or expenses as CSV.</p>
-          <div className="mt-auto flex w-full flex-col gap-2 pt-6">
-            <Button onClick={() => exportToCsv("investments")} variant="secondary" size="sm" className="w-full">
-              Investments CSV
-            </Button>
-            <Button onClick={() => exportToCsv("expenses")} variant="secondary" size="sm" className="w-full">
-              Expenses CSV
-            </Button>
-          </div>
-        </Card>
-
-        <Card className="flex h-full flex-col items-center p-8 text-center">
-          <div className="rounded-full bg-fuchsia-500/10 p-4">
-            <Settings2 className="h-8 w-8 text-fuchsia-400" />
-          </div>
-          <h4 className="mt-4 font-bold">PDF / Print</h4>
-          <p className="mt-2 text-xs text-slate-500">Open a print-friendly summary for saving as PDF.</p>
-          <div className="mt-auto w-full pt-6">
-            <Button onClick={handlePrintExport} variant="secondary" className="w-full">
-              <Download className="h-4 w-4" /> Export Summary as PDF
-            </Button>
-          </div>
-        </Card>
-      </div>
-
-      <div className="grid grid-cols-1 gap-8">
-        <Card title="Import" subtitle="Bring transaction history into the app without duplicates." className="min-w-0">
-          <div className="space-y-5">
-            <div className="rounded-2xl border border-slate-800 bg-slate-950 p-5">
-              <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                <div>
-                  <h4 className="font-semibold text-slate-100">Import from myMoney App (.sqlite)</h4>
-                  <p className="mt-1 text-sm text-slate-400">
-                    Reads your Android myMoney SQLite export in-browser and idempotently merges imported entries.
-                  </p>
-                </div>
-                <label className="w-full lg:w-auto">
-                  <div className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-3 text-sm font-semibold text-white lg:w-auto">
-                    <Upload className="h-4 w-4" /> Select SQLite File
+            <ActionTile
+              icon="upload"
+              title="Restore backup"
+              description="Import a previous JSON backup and replace the current dataset."
+              action={
+                <label className="block">
+                  <span className="sr-only">Import JSON backup</span>
+                  <div className="cursor-pointer">
+                    <Button variant="secondary" size="sm" block>
+                      Import JSON
+                    </Button>
                   </div>
-                  <input type="file" accept=".sqlite,.db" className="hidden" onChange={handleMyMoneyImport} />
+                  <input
+                    type="file"
+                    accept=".json"
+                    onChange={importFromJson}
+                    className="hidden"
+                  />
                 </label>
+              }
+            />
+
+            <ActionTile
+              icon="database"
+              title="CSV exports"
+              description="Export investments or expenses into spreadsheet-friendly files."
+              action={
+                <div className="flex gap-2">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    block
+                    onClick={() => exportToCsv("investments")}
+                  >
+                    Investments
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    block
+                    onClick={() => exportToCsv("expenses")}
+                  >
+                    Expenses
+                  </Button>
+                </div>
+              }
+            />
+
+            <ActionTile
+              icon="sparkle"
+              title="Print / PDF"
+              description="Open a print-friendly dashboard summary for saving as PDF."
+              action={
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  block
+                  onClick={handlePrintExport}
+                >
+                  Export PDF
+                </Button>
+              }
+            />
+          </div>
+
+          <div className="mt-4 rounded-[18px] bg-[color:var(--bg-3)] p-4 hairline">
+            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <div
+                    className="grid h-9 w-9 place-items-center rounded-[12px]"
+                    style={{
+                      background:
+                        "color-mix(in oklch, var(--info) 18%, transparent)",
+                      color: "var(--info)",
+                      boxShadow:
+                        "inset 0 0 0 1px color-mix(in oklch, var(--info) 35%, transparent)",
+                    }}
+                  >
+                    <Icon name="upload" size={16} />
+                  </div>
+                  <div>
+                    <div className="text-[13.5px] font-semibold">
+                      Import from myMoney (.sqlite)
+                    </div>
+                    <div className="text-[11.5px] text-[color:var(--ink-4)]">
+                      Reads the Android SQLite export in-browser and merges
+                      matching entries.
+                    </div>
+                  </div>
+                </div>
               </div>
+              <label className="block md:w-auto">
+                <span className="sr-only">Select SQLite file</span>
+                <div className="cursor-pointer">
+                  <Button block className="md:min-w-[190px]">
+                    Select SQLite File
+                  </Button>
+                </div>
+                <input
+                  type="file"
+                  accept=".sqlite,.db"
+                  className="hidden"
+                  onChange={handleMyMoneyImport}
+                />
+              </label>
             </div>
-
           </div>
         </Card>
       </div>
 
-      <div className="grid grid-cols-1 gap-8">
-        <Card title="Category Manager" subtitle="Edit imported categories and subcategories directly inside the app.">
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-            <CategoryManagerColumn
-              title="Expense Tree"
-              categories={expenseCategories}
-              type="expense"
-              onCreate={() => setCategoryEditor({ mode: "create", type: "expense", category: null })}
-              onEdit={(category) => setCategoryEditor({ mode: "edit", type: "expense", category })}
-              onDelete={handleDeleteCategory}
-            />
-            <CategoryManagerColumn
-              title="Income Tree"
-              categories={incomeCategories}
-              type="income"
-              onCreate={() => setCategoryEditor({ mode: "create", type: "income", category: null })}
-              onEdit={(category) => setCategoryEditor({ mode: "edit", type: "income", category })}
-              onDelete={handleDeleteCategory}
-            />
-          </div>
-        </Card>
-      </div>
+      <Card
+        title="Category Manager"
+        subtitle="Maintain grouped income and expense paths used across forms and reports."
+      >
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+          <CategoryManagerColumn
+            title="Expense tree"
+            categories={expenseCategories}
+            type="expense"
+            onCreate={() =>
+              setCategoryEditor({
+                mode: "create",
+                type: "expense",
+                category: null,
+              })
+            }
+            onEdit={(category) =>
+              setCategoryEditor({ mode: "edit", type: "expense", category })
+            }
+            onDelete={handleDeleteCategory}
+          />
+          <CategoryManagerColumn
+            title="Income tree"
+            categories={incomeCategories}
+            type="income"
+            onCreate={() =>
+              setCategoryEditor({
+                mode: "create",
+                type: "income",
+                category: null,
+              })
+            }
+            onEdit={(category) =>
+              setCategoryEditor({ mode: "edit", type: "income", category })
+            }
+            onDelete={handleDeleteCategory}
+          />
+        </div>
+      </Card>
 
-      <Card className="border-rose-500/20 bg-rose-500/5">
-        <div className="flex flex-col items-center justify-between gap-6 md:flex-row">
-          <div className="flex items-center gap-4">
-            <div className="rounded-xl bg-rose-500/20 p-3">
-              <AlertTriangle className="h-6 w-6 text-rose-500" />
+      <Card className="border-[color:var(--neg)]/20 bg-[color:var(--neg)]/[0.05]">
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div className="flex items-start gap-3">
+            <div
+              className="grid h-11 w-11 place-items-center rounded-[14px]"
+              style={{
+                background: "color-mix(in oklch, var(--neg) 15%, transparent)",
+                color: "var(--neg)",
+                boxShadow:
+                  "inset 0 0 0 1px color-mix(in oklch, var(--neg) 30%, transparent)",
+              }}
+            >
+              <Icon name="alert" size={18} />
             </div>
             <div>
-              <h4 className="font-bold text-rose-500">Danger Zone</h4>
-              <p className="text-sm text-slate-400">Delete all portfolio data stored in this browser.</p>
+              <div className="font-display text-[16px] font-semibold text-[color:var(--neg)]">
+                Danger Zone
+              </div>
+              <div className="mt-1 text-[12px] text-[color:var(--ink-3)]">
+                Clear all locally stored portfolio data from this browser. This
+                cannot be undone.
+              </div>
             </div>
           </div>
           <Button
             variant="danger"
             onClick={() => {
-              if (confirm("CRITICAL: This will delete ALL your data forever. Are you sure?")) {
+              if (
+                confirm(
+                  "CRITICAL: This will delete ALL your data forever. Are you sure?",
+                )
+              ) {
                 void clearAllData();
               }
             }}
           >
-            <Trash2 className="h-5 w-5" /> Clear All Data
+            <Icon name="trash" size={15} />
+            Clear All Data
           </Button>
         </div>
       </Card>
 
-      <Modal isOpen={!!importSummary} onClose={() => setImportSummary(null)} title="myMoney Import Summary">
+      <Modal
+        isOpen={!!importSummary}
+        onClose={() => setImportSummary(null)}
+        title="myMoney Import Summary"
+      >
         {importSummary && (
           <div className="space-y-4">
-            <div className="rounded-2xl border border-slate-800 bg-slate-950 p-4 text-sm text-slate-300">
-              Imported {importSummary.incomeCount} income entries, {importSummary.expenseCount} expense entries.{" "}
-              {importSummary.skippedCount} entries were skipped because they were transfers, investment-linked, or unmatched.
+            <Card className="bg-[color:var(--bg-3)] text-[12.5px] text-[color:var(--ink-2)]">
+              Imported {importSummary.incomeCount} income entries and{" "}
+              {importSummary.expenseCount} expense entries. Skipped{" "}
+              {importSummary.skippedCount} rows that were transfers,
+              investment-linked, invalid, or unmatched.
+            </Card>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <MiniPanel
+                title="Investment skipped"
+                subtitle={String(importSummary.investmentSkippedCount)}
+                tone="var(--warn)"
+              />
+              <MiniPanel
+                title="Invalid rows"
+                subtitle={String(importSummary.invalidSkippedCount)}
+                tone="var(--neg)"
+              />
+              <MiniPanel
+                title="Unmatched rows"
+                subtitle={String(importSummary.unmatchedSkippedCount)}
+                tone="var(--info)"
+              />
+              <MiniPanel
+                title="Income merged"
+                subtitle={String(importSummary.importedIncomeCategories)}
+                tone="var(--pos)"
+              />
+              <MiniPanel
+                title="Expense merged"
+                subtitle={String(importSummary.importedExpenseCategories)}
+                tone="var(--warn)"
+              />
             </div>
-            <div className="grid grid-cols-1 gap-3 text-sm text-slate-400 sm:grid-cols-3">
-              <div className="rounded-2xl border border-slate-800 bg-slate-950 p-4">
-                Investment accounts skipped: {importSummary.investmentSkippedCount}
-              </div>
-              <div className="rounded-2xl border border-slate-800 bg-slate-950 p-4">
-                Invalid rows skipped: {importSummary.invalidSkippedCount}
-              </div>
-              <div className="rounded-2xl border border-slate-800 bg-slate-950 p-4">
-                Unmatched rows skipped: {importSummary.unmatchedSkippedCount}
-              </div>
-              <div className="rounded-2xl border border-slate-800 bg-slate-950 p-4">
-                Income categories merged: {importSummary.importedIncomeCategories}
-              </div>
-              <div className="rounded-2xl border border-slate-800 bg-slate-950 p-4">
-                Expense categories merged: {importSummary.importedExpenseCategories}
-              </div>
-            </div>
-            <Button onClick={() => setImportSummary(null)} className="w-full">
+            <Button onClick={() => setImportSummary(null)} block>
               Close
             </Button>
           </div>
         )}
       </Modal>
 
-      <Modal isOpen={!!pendingImport} onClose={() => setPendingImport(null)} title="Map myMoney Accounts">
+      <Sheet
+        open={!!pendingImport}
+        onClose={() => setPendingImport(null)}
+        title="Map myMoney Accounts"
+        subtitle="Link imported account names to your portfolio accounts before merging."
+        footer={
+          <div className="flex gap-3">
+            <Button
+              type="button"
+              variant="secondary"
+              block
+              onClick={() => setPendingImport(null)}
+            >
+              Cancel
+            </Button>
+            <Button type="button" block onClick={runMappedImport}>
+              Import Now
+            </Button>
+          </div>
+        }
+      >
         {pendingImport && (
-          <div className="space-y-4">
-            <div className="text-sm text-slate-400">Map myMoney accounts to your Portfolio accounts before importing.</div>
-            <div className="space-y-3">
-              {pendingImport.accounts.map((accountName) => (
-                <div key={accountName} className="grid grid-cols-1 gap-3 rounded-2xl border border-slate-800 bg-slate-950 p-4 md:grid-cols-[1fr_1fr] md:items-center">
-                  <div className="font-medium text-slate-200">{accountName}</div>
-                  <Select value={accountMappings[accountName] || ""} onChange={(event) => setAccountMappings((current) => ({ ...current, [accountName]: event.target.value }))}>
+          <div className="space-y-3">
+            {pendingImport.accounts.map((accountName) => (
+              <Card
+                key={accountName}
+                className="bg-[color:var(--bg-3)]"
+                padded={false}
+              >
+                <div className="grid grid-cols-1 gap-3 p-4 md:grid-cols-[1fr_1fr] md:items-center">
+                  <div className="min-w-0">
+                    <div className="text-[13.5px] font-semibold">
+                      {accountName}
+                    </div>
+                    <div className="mt-0.5 text-[11px] text-[color:var(--ink-4)]">
+                      Choose destination account or mark as investment.
+                    </div>
+                  </div>
+                  <Select
+                    value={accountMappings[accountName] || ""}
+                    onChange={(event) =>
+                      setAccountMappings((current) => ({
+                        ...current,
+                        [accountName]: event.target.value,
+                      }))
+                    }
+                  >
                     <option value="">Select account</option>
                     {getAllAccounts(data).map((account) => (
                       <option key={account.id} value={account.id}>
@@ -543,19 +837,11 @@ export default function Settings({
                     <option value="skip">Skip (Investment)</option>
                   </Select>
                 </div>
-              ))}
-            </div>
-            <div className="flex gap-3 pt-2">
-              <Button type="button" variant="secondary" className="flex-1" onClick={() => setPendingImport(null)}>
-                Cancel
-              </Button>
-              <Button type="button" className="flex-1" onClick={runMappedImport}>
-                Import Now
-              </Button>
-            </div>
+              </Card>
+            ))}
           </div>
         )}
-      </Modal>
+      </Sheet>
 
       <CategoryEditorModal
         editor={categoryEditor}
@@ -567,15 +853,124 @@ export default function Settings({
   );
 }
 
-function queryRows(db: any, sql: string) {
+function ProfileMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-[14px] bg-[color:var(--bg-3)] px-3 py-2.5 hairline">
+      <div className="text-[10px] uppercase tracking-[0.12em] text-[color:var(--ink-4)]">
+        {label}
+      </div>
+      <div className="mt-1 font-display text-[16px] font-semibold">{value}</div>
+    </div>
+  );
+}
+
+function MiniPanel({
+  title,
+  subtitle,
+  tone,
+}: {
+  title: string;
+  subtitle: string;
+  tone: string;
+}) {
+  return (
+    <div className="rounded-[16px] bg-[color:var(--bg-3)] p-4 hairline">
+      <div className="flex items-center gap-2">
+        <span className="h-2 w-2 rounded-full" style={{ background: tone }} />
+        <div className="text-[12px] font-semibold text-[color:var(--ink-2)]">
+          {title}
+        </div>
+      </div>
+      <div className="mt-1 text-[11.5px] text-[color:var(--ink-4)]">
+        {subtitle}
+      </div>
+    </div>
+  );
+}
+
+function SettingRow({
+  icon,
+  label,
+  description,
+  children,
+}: {
+  icon: React.ComponentProps<typeof Icon>["name"];
+  label: string;
+  description: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex flex-col gap-3 rounded-[16px] bg-[color:var(--bg-3)] p-4 hairline md:flex-row md:items-center md:justify-between">
+      <div className="flex items-start gap-3">
+        <div
+          className="grid h-10 w-10 place-items-center rounded-[12px]"
+          style={{
+            background: "rgba(255,255,255,0.03)",
+            color: "var(--ink-2)",
+            boxShadow: "inset 0 0 0 1px var(--line)",
+          }}
+        >
+          <Icon name={icon} size={16} />
+        </div>
+        <div className="min-w-0">
+          <div className="text-[13.5px] font-semibold">{label}</div>
+          <div className="mt-0.5 text-[11.5px] text-[color:var(--ink-4)]">
+            {description}
+          </div>
+        </div>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function ActionTile({
+  icon,
+  title,
+  description,
+  action,
+}: {
+  icon: React.ComponentProps<typeof Icon>["name"];
+  title: string;
+  description: string;
+  action: React.ReactNode;
+}) {
+  return (
+    <div className="rounded-[16px] bg-[color:var(--bg-3)] p-4 hairline">
+      <div
+        className="grid h-10 w-10 place-items-center rounded-[12px]"
+        style={{
+          background: "rgba(255,255,255,0.03)",
+          color: "var(--accent)",
+          boxShadow: "inset 0 0 0 1px var(--line)",
+        }}
+      >
+        <Icon name={icon} size={16} />
+      </div>
+      <div className="mt-3 text-[13.5px] font-semibold">{title}</div>
+      <div className="mt-1 min-h-[34px] text-[11.5px] text-[color:var(--ink-4)]">
+        {description}
+      </div>
+      <div className="mt-3">{action}</div>
+    </div>
+  );
+}
+
+function queryRows(
+  db: { exec(sql: string): Array<{ columns: string[]; values: unknown[][] }> },
+  sql: string,
+) {
   const result = db.exec(sql);
   if (!result[0]) return [];
   const { columns, values } = result[0];
-  return values.map((row: any[]) =>
-    columns.reduce((acc: Record<string, any>, column: string, index: number) => {
-      acc[column] = row[index];
-      return acc;
-    }, {}),
+  return values.map((row: unknown[]) =>
+    columns.reduce(
+      (acc: Record<string, unknown>, column: string, index: number) => {
+        acc[column] = row[index];
+        return acc;
+      },
+      {},
+    ),
   );
 }
 
@@ -595,39 +990,72 @@ function CategoryManagerColumn({
   onDelete: (category: CategoryDefinition) => void;
 }) {
   const orderedCategories = [...categories].sort((a, b) => {
-    if ((a.parentId ? 1 : 0) !== (b.parentId ? 1 : 0)) return (a.parentId ? 1 : 0) - (b.parentId ? 1 : 0);
-    return getCategoryDisplayPath(a, categories).localeCompare(getCategoryDisplayPath(b, categories));
+    if ((a.parentId ? 1 : 0) !== (b.parentId ? 1 : 0))
+      return (a.parentId ? 1 : 0) - (b.parentId ? 1 : 0);
+    return getCategoryDisplayPath(a, categories).localeCompare(
+      getCategoryDisplayPath(b, categories),
+    );
   });
 
   return (
-    <div>
+    <div className="rounded-[18px] bg-[color:var(--bg-3)] p-4 hairline">
       <div className="mb-3 flex items-center justify-between gap-3">
-        <div className="text-sm font-semibold text-slate-200">{title}</div>
-        <Button size="sm" onClick={onCreate}>
-          <Plus className="h-4 w-4" /> Add
+        <div>
+          <div className="text-[14px] font-semibold text-[color:var(--ink)]">
+            {title}
+          </div>
+          <div className="text-[11px] text-[color:var(--ink-4)]">
+            {orderedCategories.length} entries
+          </div>
+        </div>
+        <Button
+          size="sm"
+          onClick={onCreate}
+          icon={<Icon name="plus" size={14} />}
+        >
+          Add
         </Button>
       </div>
-      <div className="max-h-96 space-y-2 overflow-auto pr-1">
+      <div className="max-h-96 space-y-2 overflow-auto pr-1 no-scrollbar">
         {orderedCategories.map((category) => (
-          <div key={category.id} className="flex items-center justify-between gap-3 rounded-xl border border-slate-800 bg-slate-950 px-4 py-3">
+          <div
+            key={category.id}
+            className="flex items-center justify-between gap-3 rounded-[14px] bg-[color:var(--bg-2)] px-4 py-3 hairline"
+          >
             <div className="min-w-0">
-              <div className="truncate text-sm text-slate-200">{getCategoryDisplayPath(category, categories)}</div>
+              <div className="truncate text-[13px] text-[color:var(--ink)]">
+                {getCategoryDisplayPath(category, categories)}
+              </div>
               <div className="mt-1 flex items-center gap-2">
-                <Badge variant={type === "expense" ? "warning" : "success"}>{type}</Badge>
-                <Badge variant={category.parentId ? "info" : "secondary"}>{category.parentId ? "Subcategory" : "Top Level"}</Badge>
+                <Badge variant={type === "expense" ? "warning" : "success"}>
+                  {type}
+                </Badge>
+                <Badge variant={category.parentId ? "info" : "secondary"}>
+                  {category.parentId ? "Subcategory" : "Top Level"}
+                </Badge>
               </div>
             </div>
             <div className="flex items-center gap-1">
-              <button onClick={() => onEdit(category)} className="p-2 text-slate-400 hover:text-emerald-500">
-                <Edit2 className="h-4 w-4" />
+              <button
+                onClick={() => onEdit(category)}
+                className="grid h-8 w-8 place-items-center rounded-[10px] text-[color:var(--ink-4)] hover:bg-white/[0.05] hover:text-[color:var(--ink)]"
+              >
+                <Icon name="pencil" size={14} />
               </button>
-              <button onClick={() => onDelete(category)} className="p-2 text-slate-400 hover:text-rose-500">
-                <Trash2 className="h-4 w-4" />
+              <button
+                onClick={() => onDelete(category)}
+                className="grid h-8 w-8 place-items-center rounded-[10px] text-[color:var(--ink-4)] hover:bg-white/[0.05] hover:text-[color:var(--neg)]"
+              >
+                <Icon name="trash" size={14} />
               </button>
             </div>
           </div>
         ))}
-        {orderedCategories.length === 0 && <div className="rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-slate-500">No categories yet.</div>}
+        {orderedCategories.length === 0 && (
+          <div className="rounded-[14px] bg-[color:var(--bg-2)] px-4 py-8 text-center text-[12px] text-[color:var(--ink-4)] hairline">
+            No categories yet.
+          </div>
+        )}
       </div>
     </div>
   );
@@ -642,20 +1070,35 @@ function CategoryEditorModal({
   editor: CategoryEditorState | null;
   data: PortfolioData;
   onClose: () => void;
-  onSave: (nextCategory: CategoryDefinition, previousCategory?: CategoryDefinition | null) => void;
+  onSave: (
+    nextCategory: CategoryDefinition,
+    previousCategory?: CategoryDefinition | null,
+  ) => void;
 }) {
   if (!editor) return null;
-  const categories = editor.type === "income" ? (data.settings?.incomeCategories || []) : (data.settings?.expenseCategories || []);
-  const topLevelCategories = categories.filter((category) => !category.parentId && category.id !== editor.category?.id);
+  const categories =
+    editor.type === "income"
+      ? data.settings?.incomeCategories || []
+      : data.settings?.expenseCategories || [];
+  const topLevelCategories = categories.filter(
+    (category) => !category.parentId && category.id !== editor.category?.id,
+  );
 
   return (
-    <Modal isOpen={!!editor} onClose={onClose} title={editor.mode === "edit" ? "Edit Category" : "Add Category"}>
+    <Modal
+      isOpen={!!editor}
+      onClose={onClose}
+      title={editor.mode === "edit" ? "Edit Category" : "Add Category"}
+      mobileSheet
+    >
       <form
         onSubmit={(event) => {
           event.preventDefault();
           const formData = new FormData(event.currentTarget);
           const parentId = String(formData.get("parentId") || "") || null;
-          const parentCategory = parentId ? categories.find((category) => category.id === parentId) : null;
+          const parentCategory = parentId
+            ? categories.find((category) => category.id === parentId)
+            : null;
           onSave(
             {
               id: editor.category?.id || `cat_${editor.type}_${Date.now()}`,
@@ -669,8 +1112,17 @@ function CategoryEditorModal({
         }}
         className="space-y-4"
       >
-        <Input label="Category Name" name="name" required defaultValue={editor.category?.name || ""} />
-        <Select label="Parent Category" name="parentId" defaultValue={editor.category?.parentId || ""}>
+        <Input
+          label="Category Name"
+          name="name"
+          required
+          defaultValue={editor.category?.name || ""}
+        />
+        <Select
+          label="Parent Category"
+          name="parentId"
+          defaultValue={editor.category?.parentId || ""}
+        >
           <option value="">None (Top Level)</option>
           {topLevelCategories.map((category) => (
             <option key={category.id} value={category.id}>
@@ -678,21 +1130,35 @@ function CategoryEditorModal({
             </option>
           ))}
         </Select>
-        <div className="rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-slate-400">
-          Top-level categories appear directly in reports and forms. Subcategories are stored with their parent path, like `Food / Dining`.
+        <div className="rounded-[14px] bg-[color:var(--bg-3)] px-4 py-3 text-[12px] text-[color:var(--ink-3)] hairline">
+          Top-level categories appear directly in reports and forms.
+          Subcategories are stored with their parent path, like `Food / Dining`.
         </div>
         <div className="flex gap-3 pt-4">
-          <Button type="submit" className="flex-1">{editor.mode === "edit" ? "Update Category" : "Create Category"}</Button>
-          <Button type="button" variant="secondary" onClick={onClose}>Cancel</Button>
+          <Button type="submit" block>
+            {editor.mode === "edit" ? "Update Category" : "Create Category"}
+          </Button>
+          <Button type="button" variant="secondary" onClick={onClose}>
+            Cancel
+          </Button>
         </div>
       </form>
     </Modal>
   );
 }
 
-function mergeImportedEntries<T extends { id: string }>(existing: T[], imported: T[]) {
-  const untouched = existing.filter((entry) => !entry.id.startsWith("mymoney_"));
-  const existingImported = new Map(existing.filter((entry) => entry.id.startsWith("mymoney_")).map((entry) => [entry.id, entry]));
+function mergeImportedEntries<T extends { id: string }>(
+  existing: T[],
+  imported: T[],
+) {
+  const untouched = existing.filter(
+    (entry) => !entry.id.startsWith("mymoney_"),
+  );
+  const existingImported = new Map(
+    existing
+      .filter((entry) => entry.id.startsWith("mymoney_"))
+      .map((entry) => [entry.id, entry]),
+  );
   imported.forEach((entry) => existingImported.set(entry.id, entry));
   return [...untouched, ...Array.from(existingImported.values())];
 }
@@ -711,7 +1177,9 @@ function mapPaymentMethod(accountName = ""): PaymentMethod {
 
 function mapIncomeCategory(name = ""): IncomeSource {
   const lower = name.toLowerCase();
-  const matched = Object.entries(incomeCategoryMap).find(([keyword]) => lower.includes(keyword));
+  const matched = Object.entries(incomeCategoryMap).find(([keyword]) =>
+    lower.includes(keyword),
+  );
   return matched?.[1] || "Other";
 }
 
@@ -722,11 +1190,16 @@ function mapExpenseCategory(name = ""): ExpenseCategory {
 
 function getDefaultImportMapping(accountName: string, data: PortfolioData) {
   if (shouldSkipInvestmentAccount(accountName)) return "skip";
-  const matched = getAllAccounts(data).find((account) => account.bankName.toLowerCase() === accountName.toLowerCase());
+  const matched = getAllAccounts(data).find(
+    (account) => account.bankName.toLowerCase() === accountName.toLowerCase(),
+  );
   return matched?.id || "";
 }
 
-function getImportedCategoryLabel(category: Record<string, any> | undefined, categoryRows: Record<string, any>) {
+function getImportedCategoryLabel(
+  category: Record<string, any> | undefined,
+  categoryRows: Record<string, any>,
+) {
   if (!category) return "";
   const name = String(category.NAME || "").trim();
   if (!name) return "";
@@ -736,14 +1209,22 @@ function getImportedCategoryLabel(category: Record<string, any> | undefined, cat
   return parentName ? `${parentName} / ${name}` : name;
 }
 
-function extractImportedCategories(categoryRows: Record<string, any>): { income: CategoryDefinition[]; expense: CategoryDefinition[] } {
+function extractImportedCategories(categoryRows: Record<string, any>): {
+  income: CategoryDefinition[];
+  expense: CategoryDefinition[];
+} {
   const rows = Object.values(categoryRows || {}) as Array<Record<string, any>>;
   const byId = new Map(rows.map((row) => [String(row.uid), row]));
   const income: CategoryDefinition[] = [];
   const expense: CategoryDefinition[] = [];
 
   rows.forEach((row) => {
-    const type = Number(row.TYPE) === 2 ? "income" : Number(row.TYPE) === 1 ? "expense" : null;
+    const type =
+      Number(row.TYPE) === 2
+        ? "income"
+        : Number(row.TYPE) === 1
+          ? "expense"
+          : null;
     if (!type) return;
     const id = `mymoney_${row.uid}`;
     const name = String(row.NAME || "").trim();
@@ -763,7 +1244,10 @@ function extractImportedCategories(categoryRows: Record<string, any>): { income:
   return { income, expense };
 }
 
-function normalizeImportedBackup(importedData: any, currentData: PortfolioData) {
+function normalizeImportedBackup(
+  importedData: any,
+  currentData: PortfolioData,
+) {
   return {
     ...importedData,
     transfers: importedData.transfers || [],
@@ -771,19 +1255,36 @@ function normalizeImportedBackup(importedData: any, currentData: PortfolioData) 
     settings: {
       ...currentData.settings,
       ...(importedData.settings || {}),
-      incomeCategories: importedData.settings?.incomeCategories || currentData.settings.incomeCategories || [],
-      expenseCategories: importedData.settings?.expenseCategories || currentData.settings.expenseCategories || [],
+      incomeCategories:
+        importedData.settings?.incomeCategories ||
+        currentData.settings.incomeCategories ||
+        [],
+      expenseCategories:
+        importedData.settings?.expenseCategories ||
+        currentData.settings.expenseCategories ||
+        [],
     },
   };
 }
 
-function applyCategoryUpsert(data: PortfolioData, nextCategory: CategoryDefinition, previousCategory: CategoryDefinition | null) {
-  const key = nextCategory.type === "income" ? "incomeCategories" : "expenseCategories";
+function applyCategoryUpsert(
+  data: PortfolioData,
+  nextCategory: CategoryDefinition,
+  previousCategory: CategoryDefinition | null,
+) {
+  const key =
+    nextCategory.type === "income" ? "incomeCategories" : "expenseCategories";
   const existingCategories = data.settings[key];
   const nextCategories = previousCategory
-    ? existingCategories.map((category) => (category.id === previousCategory.id ? nextCategory : category)).map((category) =>
-        category.parentId === nextCategory.id ? { ...category, parentName: nextCategory.name } : category,
-      )
+    ? existingCategories
+        .map((category) =>
+          category.id === previousCategory.id ? nextCategory : category,
+        )
+        .map((category) =>
+          category.parentId === nextCategory.id
+            ? { ...category, parentName: nextCategory.name }
+            : category,
+        )
     : [...existingCategories, nextCategory];
 
   if (!previousCategory) {
@@ -797,23 +1298,49 @@ function applyCategoryUpsert(data: PortfolioData, nextCategory: CategoryDefiniti
 
   const previousDisplayMap = buildCategoryDisplayMap(existingCategories);
   const nextDisplayMap = buildCategoryDisplayMap(nextCategories);
-  const impactedIds = new Set<string>([previousCategory.id, ...getDescendantCategoryIds(existingCategories, previousCategory.id)]);
+  const impactedIds = new Set<string>([
+    previousCategory.id,
+    ...getDescendantCategoryIds(existingCategories, previousCategory.id),
+  ]);
   const remapEntries = new Map<string, string>();
 
   impactedIds.forEach((id) => {
-    const previousCategoryDef = existingCategories.find((category) => category.id === id);
-    const nextCategoryDef = nextCategories.find((category) => category.id === id);
+    const previousCategoryDef = existingCategories.find(
+      (category) => category.id === id,
+    );
+    const nextCategoryDef = nextCategories.find(
+      (category) => category.id === id,
+    );
     if (!previousCategoryDef || !nextCategoryDef) return;
-    const previousLabel = previousDisplayMap.get(id) || previousCategoryDef.name;
+    const previousLabel =
+      previousDisplayMap.get(id) || previousCategoryDef.name;
     const nextLabel = nextDisplayMap.get(id) || nextCategoryDef.name;
     remapEntries.set(previousLabel, nextLabel);
     remapEntries.set(previousCategoryDef.name, nextLabel);
   });
 
   return {
-    income: nextCategory.type === "income" ? data.income.map((entry) => ({ ...entry, source: remapEntries.get(entry.source) || entry.source })) : data.income,
-    expenses: nextCategory.type === "expense" ? data.expenses.map((entry) => ({ ...entry, category: remapEntries.get(entry.category) || entry.category })) : data.expenses,
-    recurringRules: nextCategory.type === "expense" ? data.recurringRules.map((rule) => ({ ...rule, category: remapEntries.get(rule.category) || rule.category })) : data.recurringRules,
+    income:
+      nextCategory.type === "income"
+        ? data.income.map((entry) => ({
+            ...entry,
+            source: remapEntries.get(entry.source) || entry.source,
+          }))
+        : data.income,
+    expenses:
+      nextCategory.type === "expense"
+        ? data.expenses.map((entry) => ({
+            ...entry,
+            category: remapEntries.get(entry.category) || entry.category,
+          }))
+        : data.expenses,
+    recurringRules:
+      nextCategory.type === "expense"
+        ? data.recurringRules.map((rule) => ({
+            ...rule,
+            category: remapEntries.get(rule.category) || rule.category,
+          }))
+        : data.recurringRules,
     settings: {
       ...data.settings,
       [key]: nextCategories,
@@ -821,13 +1348,27 @@ function applyCategoryUpsert(data: PortfolioData, nextCategory: CategoryDefiniti
   };
 }
 
-function applyCategoryDelete(data: PortfolioData, categoryToDelete: CategoryDefinition) {
-  const key = categoryToDelete.type === "income" ? "incomeCategories" : "expenseCategories";
+function applyCategoryDelete(
+  data: PortfolioData,
+  categoryToDelete: CategoryDefinition,
+) {
+  const key =
+    categoryToDelete.type === "income"
+      ? "incomeCategories"
+      : "expenseCategories";
   const existingCategories = data.settings[key];
-  const removedIds = new Set<string>([categoryToDelete.id, ...getDescendantCategoryIds(existingCategories, categoryToDelete.id)]);
+  const removedIds = new Set<string>([
+    categoryToDelete.id,
+    ...getDescendantCategoryIds(existingCategories, categoryToDelete.id),
+  ]);
   const previousDisplayMap = buildCategoryDisplayMap(existingCategories);
-  const nextCategories = existingCategories.filter((category) => !removedIds.has(category.id));
-  const fallbackLabel = getFallbackCategoryLabel(nextCategories, categoryToDelete.type);
+  const nextCategories = existingCategories.filter(
+    (category) => !removedIds.has(category.id),
+  );
+  const fallbackLabel = getFallbackCategoryLabel(
+    nextCategories,
+    categoryToDelete.type,
+  );
   const removedLabels = new Set<string>();
 
   removedIds.forEach((id) => {
@@ -838,15 +1379,33 @@ function applyCategoryDelete(data: PortfolioData, categoryToDelete: CategoryDefi
   });
 
   return {
-    income: categoryToDelete.type === "income"
-      ? data.income.map((entry) => ({ ...entry, source: removedLabels.has(entry.source) ? fallbackLabel : entry.source }))
-      : data.income,
-    expenses: categoryToDelete.type === "expense"
-      ? data.expenses.map((entry) => ({ ...entry, category: removedLabels.has(entry.category) ? fallbackLabel : entry.category }))
-      : data.expenses,
-    recurringRules: categoryToDelete.type === "expense"
-      ? data.recurringRules.map((rule) => ({ ...rule, category: removedLabels.has(rule.category) ? fallbackLabel : rule.category }))
-      : data.recurringRules,
+    income:
+      categoryToDelete.type === "income"
+        ? data.income.map((entry) => ({
+            ...entry,
+            source: removedLabels.has(entry.source)
+              ? fallbackLabel
+              : entry.source,
+          }))
+        : data.income,
+    expenses:
+      categoryToDelete.type === "expense"
+        ? data.expenses.map((entry) => ({
+            ...entry,
+            category: removedLabels.has(entry.category)
+              ? fallbackLabel
+              : entry.category,
+          }))
+        : data.expenses,
+    recurringRules:
+      categoryToDelete.type === "expense"
+        ? data.recurringRules.map((rule) => ({
+            ...rule,
+            category: removedLabels.has(rule.category)
+              ? fallbackLabel
+              : rule.category,
+          }))
+        : data.recurringRules,
     settings: {
       ...data.settings,
       [key]: nextCategories,
@@ -855,10 +1414,18 @@ function applyCategoryDelete(data: PortfolioData, categoryToDelete: CategoryDefi
 }
 
 function buildCategoryDisplayMap(categories: CategoryDefinition[]) {
-  return new Map(categories.map((category) => [category.id, getCategoryDisplayPath(category, categories)]));
+  return new Map(
+    categories.map((category) => [
+      category.id,
+      getCategoryDisplayPath(category, categories),
+    ]),
+  );
 }
 
-function getDescendantCategoryIds(categories: CategoryDefinition[], categoryId: string): string[] {
+function getDescendantCategoryIds(
+  categories: CategoryDefinition[],
+  categoryId: string,
+): string[] {
   const descendants: string[] = [];
   const queue = [categoryId];
   while (queue.length > 0) {
@@ -873,7 +1440,15 @@ function getDescendantCategoryIds(categories: CategoryDefinition[], categoryId: 
   return descendants;
 }
 
-function getFallbackCategoryLabel(categories: CategoryDefinition[], type: "income" | "expense") {
-  const other = categories.find((category) => !category.parentId && category.name.toLowerCase() === "other" && category.type === type);
+function getFallbackCategoryLabel(
+  categories: CategoryDefinition[],
+  type: "income" | "expense",
+) {
+  const other = categories.find(
+    (category) =>
+      !category.parentId &&
+      category.name.toLowerCase() === "other" &&
+      category.type === type,
+  );
   return other ? getCategoryDisplayPath(other, categories) : "Other";
 }

@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { ArrowDownCircle, ArrowLeftRight, ArrowUpCircle, Edit2, Plus, Trash2 } from "lucide-react";
-import { Badge, Button, Card, Input, Modal, Select } from "../components/UI";
-import MonthNavigator from "../components/MonthNavigator";
+import Icon from "../components/Icon";
+import { Badge, Button, Card, Input, Modal, Select, Sheet } from "../components/UI";
 import { useMonthNavigator } from "../hooks/useMonthNavigator";
 import { groupTransactionsByDate } from "../utils/groupByDate";
 import {
@@ -40,22 +39,134 @@ type UnifiedTx = {
   description: string;
   categoryLine: string;
   accountLine: string;
+  method?: string;
   raw: IncomeEntry | ExpenseEntry | TransferEntry;
 };
+
+function compactINR(amount: number) {
+  const abs = Math.abs(amount);
+  const sign = amount < 0 ? "-" : "";
+  if (abs >= 1e7) return `${sign}Rs${(abs / 1e7).toFixed(abs >= 1e8 ? 1 : 2)} Cr`;
+  if (abs >= 1e5) return `${sign}Rs${(abs / 1e5).toFixed(abs >= 1e6 ? 1 : 2)} L`;
+  if (abs >= 1e3) return `${sign}Rs${(abs / 1e3).toFixed(1)}k`;
+  return `${sign}Rs${abs.toFixed(0)}`;
+}
 
 function formatMobileGroupDate(date: string) {
   const value = new Date(`${date}T00:00:00`);
   const shortDate = value.toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
   const shortWeekday = value.toLocaleDateString("en-IN", { weekday: "short" });
-  return `${shortDate} · ${shortWeekday}`;
+  return `${shortDate} | ${shortWeekday}`;
 }
 
-export default function Transactions({ data, updateData }: { data: PortfolioData; updateData: (d: Partial<PortfolioData>) => void }) {
+function dayRelativeLabel(date: string) {
+  const value = new Date(`${date}T00:00:00`);
+  const today = new Date();
+  const base = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+  const diff = Math.round((base - value.getTime()) / 86400000);
+  if (diff === 0) return "Today";
+  if (diff === 1) return "Yesterday";
+  return formatMobileGroupDate(date);
+}
+
+function MiniBars({ series, color }: { series: number[]; color: string }) {
+  const max = Math.max(...series, 1);
+  return (
+    <div className="mt-2 flex h-[22px] items-end gap-[3px]">
+      {series.map((value, index) => (
+        <div
+          key={index}
+          className="flex-1 rounded-[2px]"
+          style={{
+            height: `${Math.max(3, (value / max) * 22)}px`,
+            background: value === 0 ? "rgba(255,255,255,.06)" : `color-mix(in oklch, ${color} ${60 + (value / max) * 40}%, transparent)`,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+function KindTabs({
+  value,
+  onChange,
+  counts,
+}: {
+  value: "all" | TxType;
+  onChange: (value: "all" | TxType) => void;
+  counts: Record<"all" | TxType, number>;
+}) {
+  const options: Array<{ id: "all" | TxType; label: string; icon?: React.ComponentProps<typeof Icon>["name"] }> = [
+    { id: "all", label: "All" },
+    { id: "expense", label: "Expense", icon: "arrow-up-right" },
+    { id: "income", label: "Income", icon: "arrow-down-right" },
+    { id: "transfer", label: "Transfer", icon: "swap" },
+  ];
+
+  return (
+    <div className="inline-flex rounded-full bg-[color:var(--bg-3)] p-1 hairline">
+      {options.map((option) => {
+        const active = value === option.id;
+        return (
+          <button
+            key={option.id}
+            type="button"
+            onClick={() => onChange(option.id)}
+            className={`relative inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-[13px] font-semibold transition ${
+              active ? "bg-[color:var(--accent)] text-[color:var(--bg)]" : "text-[color:var(--ink-3)] hover:text-[color:var(--ink)]"
+            }`}
+          >
+            {option.icon && <Icon name={option.icon} size={14} strokeWidth={2} />}
+            {option.label}
+            <span className={`rounded-full px-1.5 text-[10px] font-mono-num ${active ? "bg-black/20" : "bg-white/[0.05]"}`}>
+              {counts[option.id]}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function FilterPill({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-full px-3 py-1.5 text-[12px] transition ${
+        active
+          ? "bg-[color:var(--accent)]/15 text-[color:var(--accent)] ring-1 ring-inset ring-[color:var(--accent)]/40"
+          : "bg-[color:var(--bg-3)] text-[color:var(--ink-2)] ring-1 ring-inset ring-white/[0.06]"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
+export default function Transactions({
+  data,
+  updateData,
+}: {
+  data: PortfolioData;
+  updateData: (d: Partial<PortfolioData>) => void;
+}) {
   const navigator = useMonthNavigator();
   const accounts = getAllAccounts(data);
-  const [activeTypes, setActiveTypes] = useState<Set<TxType>>(new Set());
-  const [activeAccounts, setActiveAccounts] = useState<Set<string>>(new Set());
+  const [query, setQuery] = useState("");
+  const [kind, setKind] = useState<"all" | TxType>("all");
+  const [accountFilter, setAccountFilter] = useState<string | null>(null);
+  const [methodFilter, setMethodFilter] = useState<string | null>(null);
   const [showOnlyUnassigned, setShowOnlyUnassigned] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [formType, setFormType] = useState<TxType>("expense");
   const [editingTx, setEditingTx] = useState<UnifiedTx | null>(null);
@@ -81,9 +192,11 @@ export default function Transactions({ data, updateData }: { data: PortfolioData
       type: "income" as const,
       description: entry.description || entry.source,
       categoryLine: entry.source,
-      accountLine: `Received in ${entry.toAccountName || "Account?"}`,
+      accountLine: entry.toAccountName || "Account?",
+      method: "Credit",
       raw: entry,
     }));
+
     const expenses = monthExpenses.map((entry) => ({
       id: entry.id,
       date: entry.date,
@@ -91,9 +204,11 @@ export default function Transactions({ data, updateData }: { data: PortfolioData
       type: "expense" as const,
       description: entry.description || entry.category,
       categoryLine: entry.category,
-      accountLine: `${entry.fromAccountName || "Account?"}${entry.fromAccountName ? ` | ${entry.paymentMethod}` : ""}`,
+      accountLine: entry.fromAccountName || "Account?",
+      method: entry.paymentMethod,
       raw: entry,
     }));
+
     const transfers = monthTransfers.map((entry) => ({
       id: entry.id,
       date: entry.date,
@@ -102,59 +217,79 @@ export default function Transactions({ data, updateData }: { data: PortfolioData
       description: entry.description || "Transfer",
       categoryLine: "Transfer",
       accountLine: `${entry.fromAccountName} -> ${entry.toAccountName}`,
+      method: "Transfer",
       raw: entry,
     }));
-    return [...income, ...expenses, ...transfers].sort((a, b) => b.date.localeCompare(a.date));
+
+    return [...income, ...expenses, ...transfers].sort((a, b) => {
+      const dateDiff = b.date.localeCompare(a.date);
+      if (dateDiff !== 0) return dateDiff;
+      return b.amount - a.amount;
+    });
   }, [monthExpenses, monthIncome, monthTransfers]);
 
-  const filtered = unified.filter((tx) => {
-    if (showOnlyUnassigned) {
-      if (tx.type === "income" && (tx.raw as IncomeEntry).toAccountId) return false;
-      if (tx.type === "expense" && (tx.raw as ExpenseEntry).fromAccountId) return false;
-      if (tx.type === "transfer") return false;
-    }
-    if (activeTypes.size > 0 && !activeTypes.has(tx.type)) return false;
-    if (activeAccounts.size > 0) {
-      if (tx.type === "income") {
-        const entry = tx.raw as IncomeEntry;
-        if (!entry.toAccountId || !activeAccounts.has(entry.toAccountId)) return false;
+  const filtered = useMemo(() => {
+    return unified.filter((tx) => {
+      if (showOnlyUnassigned) {
+        if (tx.type === "income" && (tx.raw as IncomeEntry).toAccountId) return false;
+        if (tx.type === "expense" && (tx.raw as ExpenseEntry).fromAccountId) return false;
+        if (tx.type === "transfer") return false;
       }
-      if (tx.type === "expense") {
-        const entry = tx.raw as ExpenseEntry;
-        if (!entry.fromAccountId || !activeAccounts.has(entry.fromAccountId)) return false;
+
+      if (kind !== "all" && tx.type !== kind) return false;
+
+      const queryText = `${tx.description} ${tx.categoryLine} ${tx.accountLine} ${tx.method || ""}`.toLowerCase();
+      if (query && !queryText.includes(query.toLowerCase())) return false;
+
+      if (accountFilter) {
+        if (tx.type === "income" && (tx.raw as IncomeEntry).toAccountId !== accountFilter) return false;
+        if (tx.type === "expense" && (tx.raw as ExpenseEntry).fromAccountId !== accountFilter) return false;
+        if (tx.type === "transfer") {
+          const transfer = tx.raw as TransferEntry;
+          if (transfer.fromAccountId !== accountFilter && transfer.toAccountId !== accountFilter) return false;
+        }
       }
-      if (tx.type === "transfer") {
-        const entry = tx.raw as TransferEntry;
-        if (!activeAccounts.has(entry.fromAccountId) && !activeAccounts.has(entry.toAccountId)) return false;
+
+      if (methodFilter) {
+        if (tx.type !== "expense") return false;
+        if ((tx.raw as ExpenseEntry).paymentMethod !== methodFilter) return false;
       }
-    }
-    return true;
-  });
+
+      return true;
+    });
+  }, [accountFilter, kind, methodFilter, query, showOnlyUnassigned, unified]);
 
   const grouped = groupTransactionsByDate(filtered, "mixed");
 
-  const toggleType = (type: TxType) => {
-    setActiveTypes((prev) => {
-      const next = new Set(prev);
-      if (next.has(type)) next.delete(type);
-      else next.add(type);
-      return next;
-    });
-  };
+  const counts = useMemo(
+    () => ({
+      all: unified.length,
+      income: unified.filter((tx) => tx.type === "income").length,
+      expense: unified.filter((tx) => tx.type === "expense").length,
+      transfer: unified.filter((tx) => tx.type === "transfer").length,
+    }),
+    [unified],
+  );
 
-  const toggleAccount = (accountId: string) => {
-    setActiveAccounts((prev) => {
-      const next = new Set(prev);
-      if (next.has(accountId)) next.delete(accountId);
-      else next.add(accountId);
-      return next;
-    });
-  };
+  const incomeTotal = filtered.filter((tx) => tx.type === "income").reduce((sum, tx) => sum + tx.amount, 0);
+  const expenseTotal = filtered.filter((tx) => tx.type === "expense").reduce((sum, tx) => sum + tx.amount, 0);
+
+  const incomeSeries = Array.from({ length: 14 }, (_, index) => {
+    const date = new Date(navigator.year, navigator.month, index + 1).toISOString().slice(0, 10);
+    return filtered.filter((tx) => tx.date === date && tx.type === "income").reduce((sum, tx) => sum + tx.amount, 0);
+  });
+
+  const expenseSeries = Array.from({ length: 14 }, (_, index) => {
+    const date = new Date(navigator.year, navigator.month, index + 1).toISOString().slice(0, 10);
+    return filtered.filter((tx) => tx.date === date && tx.type === "expense").reduce((sum, tx) => sum + tx.amount, 0);
+  });
 
   const resetFilters = () => {
-    setActiveTypes(new Set());
-    setActiveAccounts(new Set());
+    setKind("all");
+    setAccountFilter(null);
+    setMethodFilter(null);
     setShowOnlyUnassigned(false);
+    setQuery("");
   };
 
   const openEdit = (tx: UnifiedTx) => {
@@ -174,135 +309,274 @@ export default function Transactions({ data, updateData }: { data: PortfolioData
   };
 
   return (
-    <div className="space-y-8">
-      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+    <div className="space-y-3 px-4 pt-4 pb-8 lg:px-0">
+      <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-3xl font-bold text-slate-100">Transactions</h2>
-          <p className="text-slate-400">Income, expense, and transfers in one feed.</p>
-        </div>
-        <Button onClick={() => { setEditingTx(null); setFormType("expense"); setIsModalOpen(true); }} className="flex items-center gap-2">
-          <Plus className="h-5 w-5" />
-          Add Transaction
-        </Button>
-      </div>
-
-      <Card className="border-slate-800 bg-slate-900">
-        <div className="space-y-4">
-          <MonthNavigator label={navigator.label} onPrev={navigator.goToPrev} onNext={navigator.goToNext} isCurrentMonth={navigator.isCurrentMonth} onToday={navigator.goToToday} />
-          <div className="flex flex-nowrap gap-2 overflow-x-auto pb-1">
-            <Pill active={activeTypes.size === 0 && activeAccounts.size === 0} onClick={resetFilters}>
-              All
-            </Pill>
-            <Pill active={showOnlyUnassigned} onClick={() => setShowOnlyUnassigned((value) => !value)}>
-              Needs Account
-            </Pill>
-            <Pill active={activeTypes.has("income")} onClick={() => toggleType("income")}>Income</Pill>
-            <Pill active={activeTypes.has("expense")} onClick={() => toggleType("expense")}>Expense</Pill>
-            <Pill active={activeTypes.has("transfer")} onClick={() => toggleType("transfer")}>Transfer</Pill>
-            {accounts.map((account) => (
-              <React.Fragment key={account.id}>
-                <Pill active={activeAccounts.has(account.id)} onClick={() => toggleAccount(account.id)}>
-                  {account.bankName}
-                </Pill>
-              </React.Fragment>
-            ))}
+          <div className="font-display text-[20px] font-semibold">Transactions</div>
+          <div className="flex items-center gap-2 text-[11.5px] text-[color:var(--ink-4)]">
+            <span>{filtered.length} entries | {navigator.label}</span>
+            <div className="inline-flex items-center gap-1">
+              <button
+                type="button"
+                onClick={navigator.goToPrev}
+                className="grid h-6 w-6 place-items-center rounded-full bg-[color:var(--bg-3)] text-[color:var(--ink-3)] ring-1 ring-inset ring-white/[0.06] hover:text-[color:var(--ink)]"
+              >
+                <Icon name="chev-left" size={12} />
+              </button>
+              <button
+                type="button"
+                onClick={navigator.goToNext}
+                disabled={navigator.isCurrentMonth}
+                className="grid h-6 w-6 place-items-center rounded-full bg-[color:var(--bg-3)] text-[color:var(--ink-3)] ring-1 ring-inset ring-white/[0.06] hover:text-[color:var(--ink)] disabled:cursor-not-allowed disabled:opacity-35"
+              >
+                <Icon name="chev-right" size={12} />
+              </button>
+            </div>
           </div>
         </div>
-      </Card>
+        <button
+          type="button"
+          onClick={() => {
+            setEditingTx(null);
+            setFormType("expense");
+            setIsModalOpen(true);
+          }}
+          className="grid h-10 w-10 place-items-center rounded-full bg-[color:var(--accent)] text-[color:var(--bg)] shadow-[0_6px_18px_-6px_color-mix(in_oklch,var(--accent)_60%,transparent)]"
+        >
+          <Icon name="plus" size={18} strokeWidth={2.4} />
+        </button>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <Card>
+          <div className="text-[10.5px] font-semibold uppercase tracking-[0.1em] text-[color:var(--ink-4)]">In</div>
+          <div className="mt-1 font-display text-[18px] font-semibold tabular text-[color:var(--pos)]">+{compactINR(incomeTotal)}</div>
+          <MiniBars series={incomeSeries} color="var(--pos)" />
+        </Card>
+        <Card>
+          <div className="text-[10.5px] font-semibold uppercase tracking-[0.1em] text-[color:var(--ink-4)]">Out</div>
+          <div className="mt-1 font-display text-[18px] font-semibold tabular text-[color:var(--neg)]">-{compactINR(expenseTotal)}</div>
+          <MiniBars series={expenseSeries} color="var(--neg)" />
+        </Card>
+      </div>
+
+      <div className="flex gap-2">
+        <div className="flex flex-1 items-center gap-2 rounded-[14px] bg-[color:var(--bg-3)] px-3.5 py-[11px] ring-1 ring-inset ring-white/[0.06]">
+          <Icon name="search" size={16} className="text-[color:var(--ink-4)]" />
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search description, category..."
+            className="flex-1 bg-transparent text-[14px] text-[color:var(--ink)] outline-none placeholder:text-[color:var(--ink-4)]"
+          />
+        </div>
+        <button
+          type="button"
+          onClick={() => setFiltersOpen(true)}
+          className={`relative grid h-[44px] w-[44px] shrink-0 place-items-center rounded-[14px] ring-1 ring-inset transition ${
+            accountFilter || methodFilter || showOnlyUnassigned
+              ? "bg-[color:var(--accent)]/10 text-[color:var(--accent)] ring-[color:var(--accent)]/40"
+              : "bg-[color:var(--bg-3)] text-[color:var(--ink-2)] ring-white/[0.06]"
+          }`}
+        >
+          <Icon name="filter" size={18} />
+          {(accountFilter || methodFilter || showOnlyUnassigned) && <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-[color:var(--accent)]" />}
+        </button>
+      </div>
+
+      <div className="overflow-x-auto no-scrollbar">
+        <KindTabs value={kind} onChange={setKind} counts={counts} />
+      </div>
+
+      {(accountFilter || methodFilter || showOnlyUnassigned) && (
+        <div className="flex flex-wrap gap-1.5">
+          {showOnlyUnassigned && (
+            <button
+              type="button"
+              onClick={() => setShowOnlyUnassigned(false)}
+              className="inline-flex items-center gap-1.5 rounded-full bg-[color:var(--accent)]/10 px-2.5 py-1 text-[11px] text-[color:var(--accent)] ring-1 ring-inset ring-[color:var(--accent)]/25"
+            >
+              Needs account <Icon name="close" size={11} />
+            </button>
+          )}
+          {accountFilter && (
+            <button
+              type="button"
+              onClick={() => setAccountFilter(null)}
+              className="inline-flex items-center gap-1.5 rounded-full bg-[color:var(--accent)]/10 px-2.5 py-1 text-[11px] text-[color:var(--accent)] ring-1 ring-inset ring-[color:var(--accent)]/25"
+            >
+              {accounts.find((account) => account.id === accountFilter)?.bankName || "Account"} <Icon name="close" size={11} />
+            </button>
+          )}
+          {methodFilter && (
+            <button
+              type="button"
+              onClick={() => setMethodFilter(null)}
+              className="inline-flex items-center gap-1.5 rounded-full bg-[color:var(--accent)]/10 px-2.5 py-1 text-[11px] text-[color:var(--accent)] ring-1 ring-inset ring-[color:var(--accent)]/25"
+            >
+              {methodFilter} <Icon name="close" size={11} />
+            </button>
+          )}
+        </div>
+      )}
 
       {grouped.length === 0 ? (
-        <Card><div className="py-12 text-center text-slate-500">No transactions for this month.</div></Card>
+        <Card className="py-10 text-center">
+          <div className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-white/[0.05] text-[color:var(--ink-4)]">
+            <Icon name="inbox" size={22} />
+          </div>
+          <div className="mt-3 font-display text-[15px] font-semibold">No matches</div>
+          <div className="text-[12px] text-[color:var(--ink-4)]">Try clearing filters or changing search.</div>
+        </Card>
       ) : (
         grouped.map((group) => {
-          const dayIncome = group.items.filter((item) => (item as UnifiedTx).type === "income").reduce((sum, item) => sum + (item as UnifiedTx).amount, 0);
-          const dayExpense = group.items.filter((item) => (item as UnifiedTx).type === "expense").reduce((sum, item) => sum + (item as UnifiedTx).amount, 0);
+          const dayRows = group.items as UnifiedTx[];
+          const dayTotal = dayRows.reduce((sum, tx) => sum + (tx.type === "income" ? tx.amount : tx.type === "expense" ? -tx.amount : 0), 0);
+
           return (
             <div key={group.date}>
-              <Card className="overflow-hidden">
-                <div className="-m-6">
-                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 bg-slate-800/70 px-6 py-4">
-                    <span className="font-semibold text-slate-200 transaction-date-header">
-                      <span className="transaction-date-header-desktop">{group.displayDate}</span>
-                      <span className="transaction-date-header-mobile">{formatMobileGroupDate(group.date)}</span>
-                    </span>
-                    <div className="flex items-center gap-3">
-                      {dayIncome > 0 && <span className="font-bold text-emerald-400">Income: {formatCurrency(dayIncome)}</span>}
-                      {dayExpense > 0 && <span className="font-bold text-rose-400">Expense: {formatCurrency(dayExpense)}</span>}
-                    </div>
-                  </div>
-                  <div className="divide-y divide-slate-800/60">
-                    {group.items.map((item) => {
-                      const tx = item as UnifiedTx;
-                      const isAutoGenerated = tx.type === "expense" && (tx.raw as ExpenseEntry).isAutoGenerated;
-                      const hasMissingAccount =
-                        (tx.type === "income" && !(tx.raw as IncomeEntry).toAccountId) ||
-                        (tx.type === "expense" && !(tx.raw as ExpenseEntry).fromAccountId && !isAutoGenerated);
-                      return (
-                        <div key={`${tx.type}-${tx.id}`} className="transaction-row flex flex-col justify-between gap-4 px-6 py-4 md:flex-row md:items-start">
-                          <div className="transaction-main flex items-start gap-3 min-w-0">
-                            <div className="transaction-icon rounded-xl bg-slate-800 p-2 text-slate-300 shrink-0">
-                              {tx.type === "income" && <ArrowUpCircle className="h-5 w-5" />}
-                              {tx.type === "expense" && <ArrowDownCircle className="h-5 w-5" />}
-                              {tx.type === "transfer" && <ArrowLeftRight className="h-5 w-5" />}
-                            </div>
-                            <div className="transaction-copy min-w-0">
-                              <div className="flex flex-wrap items-center gap-2">
-                                <span className="transaction-description font-semibold text-slate-100">{tx.description}</span>
-                                {isAutoGenerated && (
-                                  <span title="This entry is auto-generated from your SIP/RD schedule">
-                                    <Badge variant="warning">Auto</Badge>
-                                  </span>
-                                )}
-                                {hasMissingAccount && (
-                                  <button
-                                    onClick={() => {
-                                      if (tx.type === "income") setQuickAssignIncome(tx.raw as IncomeEntry);
-                                      if (tx.type === "expense") setQuickAssignExpense(tx.raw as ExpenseEntry);
-                                    }}
-                                  >
-                                    <Badge variant="warning">Account?</Badge>
-                                  </button>
-                                )}
-                              </div>
-                              <div className="text-sm text-slate-400">{tx.categoryLine}</div>
-                              <div className="text-xs text-slate-500">{tx.accountLine}</div>
-                            </div>
-                          </div>
-                          <div className="transaction-meta flex items-center gap-3">
-                            <div className={`transaction-amount-wrap text-right ${tx.type === "income" ? "text-emerald-400" : tx.type === "expense" ? "text-rose-400" : "text-slate-200"}`}>
-                              <div className="font-bold">
-                                {tx.type === "income" ? "+" : tx.type === "expense" ? "-" : ""} {formatCurrency(tx.amount)}
-                              </div>
-                              <div className="transaction-account-mobile text-xs font-medium text-slate-500">{tx.accountLine}</div>
-                            </div>
-                            <div className="transaction-actions flex items-center gap-3">
-                              {!isAutoGenerated && (
-                                <>
-                                  <button onClick={() => openEdit(tx)} className="p-2 text-slate-400 hover:text-emerald-500"><Edit2 className="h-4 w-4" /></button>
-                                  <button onClick={() => deleteTx(tx)} className="p-2 text-slate-400 hover:text-rose-500"><Trash2 className="h-4 w-4" /></button>
-                                </>
-                              )}
-                              {isAutoGenerated && (
-                                <span className="text-xs text-slate-500" title="This entry is auto-generated from your SIP/RD schedule">
-                                  Edit in Investments
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
+              <div className="flex items-center justify-between px-1 pt-2 pb-1.5">
+                <div className="text-[11.5px] font-semibold uppercase tracking-[0.08em] text-[color:var(--ink-4)]">{dayRelativeLabel(group.date)}</div>
+                <div className={`font-mono-num text-[11.5px] tabular ${dayTotal >= 0 ? "text-[color:var(--pos)]" : "text-[color:var(--ink-3)]"}`}>
+                  {dayTotal >= 0 ? "+" : "-"}{compactINR(Math.abs(dayTotal))}
                 </div>
+              </div>
+
+              <Card padded={false}>
+                {dayRows.map((tx, index) => {
+                  const toneColor = tx.type === "income" ? "var(--pos)" : tx.type === "expense" ? "var(--neg)" : "var(--info)";
+                  const isAutoGenerated = tx.type === "expense" && (tx.raw as ExpenseEntry).isAutoGenerated;
+                  const hasMissingAccount =
+                    (tx.type === "income" && !(tx.raw as IncomeEntry).toAccountId) ||
+                    (tx.type === "expense" && !(tx.raw as ExpenseEntry).fromAccountId && !isAutoGenerated);
+
+                  return (
+                    <div key={`${tx.type}-${tx.id}`} className={`flex items-center gap-3 px-4 py-3 ${index > 0 ? "border-t border-white/[0.05]" : ""}`}>
+                      <div
+                        className="grid h-[38px] w-[38px] place-items-center rounded-[12px]"
+                        style={{ background: `color-mix(in oklch, ${toneColor} 18%, transparent)`, color: toneColor }}
+                      >
+                        <Icon name={tx.type === "income" ? "arrow-down-right" : tx.type === "expense" ? "arrow-up-right" : "swap"} size={16} />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <div className="truncate text-[13.5px] font-semibold text-[color:var(--ink)]">{tx.description}</div>
+                          {isAutoGenerated && <Badge variant="info">Auto</Badge>}
+                          {hasMissingAccount && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (tx.type === "income") setQuickAssignIncome(tx.raw as IncomeEntry);
+                                if (tx.type === "expense") setQuickAssignExpense(tx.raw as ExpenseEntry);
+                              }}
+                            >
+                              <Badge variant="warning">Account?</Badge>
+                            </button>
+                          )}
+                        </div>
+                        <div className="mt-0.5 flex items-center gap-1.5 text-[11.5px] text-[color:var(--ink-4)]">
+                          <span className="truncate">{tx.accountLine}</span>
+                          {tx.method && (
+                            <>
+                              <span>|</span>
+                              <span>{tx.method}</span>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className="font-mono-num text-[14px] font-semibold tabular" style={{ color: toneColor }}>
+                          {tx.type === "income" ? "+" : tx.type === "expense" ? "-" : ""}{compactINR(tx.amount)}
+                        </div>
+                        <div className="text-[10px] uppercase tracking-wider text-[color:var(--ink-4)]">{tx.categoryLine}</div>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        {!isAutoGenerated && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => openEdit(tx)}
+                              className="grid h-8 w-8 place-items-center rounded-[10px] text-[color:var(--ink-4)] hover:bg-white/[0.05] hover:text-[color:var(--ink)]"
+                            >
+                              <Icon name="pencil" size={14} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => deleteTx(tx)}
+                              className="grid h-8 w-8 place-items-center rounded-[10px] text-[color:var(--ink-4)] hover:bg-white/[0.05] hover:text-[color:var(--neg)]"
+                            >
+                              <Icon name="trash" size={14} />
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
               </Card>
             </div>
           );
         })
       )}
 
+      <Sheet
+        open={filtersOpen}
+        onClose={() => setFiltersOpen(false)}
+        title="Filters"
+        subtitle="Refine your list"
+        footer={
+          <div className="flex gap-2">
+            <Button variant="secondary" block onClick={resetFilters}>Reset</Button>
+            <Button block onClick={() => setFiltersOpen(false)}>Apply</Button>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          <div>
+            <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-[color:var(--ink-4)]">Status</div>
+            <div className="flex flex-wrap gap-1.5">
+              <FilterPill active={showOnlyUnassigned} onClick={() => setShowOnlyUnassigned((value) => !value)}>Needs account</FilterPill>
+            </div>
+          </div>
+
+          <div>
+            <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-[color:var(--ink-4)]">Account</div>
+            <div className="flex flex-wrap gap-1.5">
+              {accounts.map((account) => (
+                <FilterPill
+                  key={account.id}
+                  active={accountFilter === account.id}
+                  onClick={() => setAccountFilter(accountFilter === account.id ? null : account.id)}
+                >
+                  {account.bankName}
+                </FilterPill>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-[color:var(--ink-4)]">Payment method</div>
+            <div className="flex flex-wrap gap-1.5">
+              {getExpenseMethods().map((method) => (
+                <FilterPill
+                  key={method}
+                  active={methodFilter === method}
+                  onClick={() => setMethodFilter(methodFilter === method ? null : method)}
+                >
+                  {method}
+                </FilterPill>
+              ))}
+            </div>
+          </div>
+        </div>
+      </Sheet>
+
       <TransactionModal
         isOpen={isModalOpen}
-        onClose={() => { setIsModalOpen(false); setEditingTx(null); }}
+        onClose={() => {
+          setIsModalOpen(false);
+          setEditingTx(null);
+        }}
         formType={formType}
         setFormType={setFormType}
         data={data}
@@ -314,14 +588,6 @@ export default function Transactions({ data, updateData }: { data: PortfolioData
       <QuickAssignIncomeModal data={data} entry={quickAssignIncome} onClose={() => setQuickAssignIncome(null)} updateData={updateData} />
       <QuickAssignExpenseModal data={data} entry={quickAssignExpense} onClose={() => setQuickAssignExpense(null)} updateData={updateData} />
     </div>
-  );
-}
-
-function Pill({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
-  return (
-    <button onClick={onClick} className={`rounded-full border px-3 py-1 text-xs font-semibold ${active ? "border-emerald-500/50 bg-emerald-500/10 text-emerald-200" : "border-slate-800 bg-slate-950 text-slate-400 hover:text-slate-200"}`}>
-      {children}
-    </button>
   );
 }
 
@@ -351,11 +617,16 @@ function TransactionModal({
   const isEditing = Boolean(editingTx);
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={isEditing ? "Edit Transaction" : "Add Transaction"} mobileSheet className="transaction-form-modal">
-      <div className="transaction-form-shell space-y-4">
+    <Modal isOpen={isOpen} onClose={onClose} title={isEditing ? "Edit Transaction" : "Add Transaction"} mobileSheet className="max-w-[560px]">
+      <div className="space-y-4">
         <div className="flex gap-2">
           {(["income", "expense", "transfer"] as TxType[]).map((type) => (
-            <button key={type} onClick={() => setFormType(type)} className={`flex-1 rounded-xl px-3 py-2 text-sm font-semibold ${formType === type ? "bg-emerald-500 text-white" : "bg-slate-800 text-slate-300"}`}>
+            <button
+              key={type}
+              type="button"
+              onClick={() => setFormType(type)}
+              className={`flex-1 rounded-[12px] px-3 py-2 text-sm font-semibold ${formType === type ? "bg-[color:var(--accent)] text-[color:var(--bg)]" : "bg-[color:var(--bg-3)] text-[color:var(--ink-3)] hairline"}`}
+            >
               {type[0].toUpperCase() + type.slice(1)}
             </button>
           ))}
@@ -381,7 +652,7 @@ function TransactionModal({
             className="space-y-4"
           >
             <Input label="Amount" name="amount" type="number" required defaultValue={(editingTx?.raw as IncomeEntry | undefined)?.amount} />
-            <div className="transaction-form-grid-2">
+            <div className="grid grid-cols-2 gap-3">
               <Input label="Date" name="date" type="date" required defaultValue={(editingTx?.raw as IncomeEntry | undefined)?.date || new Date().toISOString().slice(0, 10)} />
               <Select label="Source" name="source" defaultValue={(editingTx?.raw as IncomeEntry | undefined)?.source || "Salary"}>
                 {getIncomeSources(data).map((source) => <option key={source} value={source}>{source}</option>)}
@@ -391,20 +662,15 @@ function TransactionModal({
               {accounts.map((account) => <option key={account.id} value={account.id}>{account.bankName}</option>)}
             </Select>
             <Input label="Description / Note" name="description" defaultValue={(editingTx?.raw as IncomeEntry | undefined)?.description} />
-            <div className="flex gap-3 pt-4">
-              <Button type="submit" className="flex-1">{isEditing ? "Update" : "Add"}</Button>
+            <div className="flex gap-3 pt-2">
+              <Button type="submit" block>{isEditing ? "Update" : "Add"}</Button>
               <Button type="button" variant="secondary" onClick={onClose}>Cancel</Button>
             </div>
           </form>
         )}
 
-        {formType === "expense" && (
-          <ExpenseForm data={data} editing={editingTx?.raw as ExpenseEntry | undefined} onSave={onSaveExpense} onClose={onClose} />
-        )}
-
-        {formType === "transfer" && (
-          <TransferForm data={data} editing={editingTx?.raw as TransferEntry | undefined} onSave={onSaveTransfer} onClose={onClose} />
-        )}
+        {formType === "expense" && <ExpenseForm data={data} editing={editingTx?.raw as ExpenseEntry | undefined} onSave={onSaveExpense} onClose={onClose} />}
+        {formType === "transfer" && <TransferForm data={data} editing={editingTx?.raw as TransferEntry | undefined} onSave={onSaveTransfer} onClose={onClose} />}
       </div>
     </Modal>
   );
@@ -451,7 +717,7 @@ function ExpenseForm({
       className="space-y-4"
     >
       <Input label="Amount" name="amount" type="number" required defaultValue={editing?.amount} />
-      <div className="transaction-form-grid-2">
+      <div className="grid grid-cols-2 gap-3">
         <Input label="Date" name="date" type="date" required defaultValue={editing?.date || new Date().toISOString().slice(0, 10)} />
         <Select label="Category" name="category" defaultValue={editing?.category || "Food"}>
           {getExpenseCategories(data).map((category) => <option key={category} value={category}>{category}</option>)}
@@ -466,8 +732,8 @@ function ExpenseForm({
         </Select>
       )}
       <Input label="Description / Note" name="description" defaultValue={editing?.description} />
-      <div className="flex gap-3 pt-4">
-        <Button type="submit" className="flex-1">{editing ? "Update" : "Add"}</Button>
+      <div className="flex gap-3 pt-2">
+        <Button type="submit" block>{editing ? "Update" : "Add"}</Button>
         <Button type="button" variant="secondary" onClick={onClose}>Cancel</Button>
       </div>
     </form>
@@ -518,7 +784,7 @@ function TransferForm({
       className="space-y-4"
     >
       <Input label="Amount" name="amount" type="number" required defaultValue={editing?.amount} />
-      <div className="transaction-form-grid-2">
+      <div className="grid grid-cols-2 gap-3">
         <Input label="Date" name="date" type="date" required defaultValue={editing?.date || new Date().toISOString().slice(0, 10)} />
         <Select label="From Account" value={fromAccountId} onChange={(event) => setFromAccountId(event.target.value)}>
           {accounts.map((account) => <option key={account.id} value={account.id}>{account.bankName}</option>)}
@@ -529,8 +795,8 @@ function TransferForm({
       </Select>
       <Input label="Transfer Fees" name="fees" type="number" defaultValue={editing?.fees || 0} />
       <Input label="Description / Note" name="description" defaultValue={editing?.description} />
-      <div className="flex gap-3 pt-4">
-        <Button type="submit" className="flex-1">{editing ? "Update" : "Add"}</Button>
+      <div className="flex gap-3 pt-2">
+        <Button type="submit" block>{editing ? "Update" : "Add"}</Button>
         <Button type="button" variant="secondary" onClick={onClose}>Cancel</Button>
       </div>
     </form>
@@ -550,23 +816,23 @@ function QuickAssignIncomeModal({
 }) {
   const accounts = getAllAccounts(data);
   if (!entry) return null;
+
   return (
     <Modal isOpen={!!entry} onClose={onClose} title="Assign Account">
       <div className="space-y-4">
-        <div className="rounded-2xl border border-slate-800 bg-slate-950 p-4 text-sm text-slate-300">
+        <div className="rounded-[16px] bg-[color:var(--bg-3)] px-4 py-3 text-sm text-[color:var(--ink-2)] hairline">
           {entry.description || entry.source} - {formatCurrency(entry.amount)}
         </div>
         <div className="grid grid-cols-1 gap-2">
           {accounts.map((account) => (
             <button
               key={account.id}
+              type="button"
               onClick={() => {
-                updateData(
-                  saveIncomeEntry(data, { ...entry, toAccountId: account.id, toAccountName: account.bankName }, entry),
-                );
+                updateData(saveIncomeEntry(data, { ...entry, toAccountId: account.id, toAccountName: account.bankName }, entry));
                 onClose();
               }}
-              className="rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-left hover:border-emerald-500/40"
+              className="rounded-[14px] bg-[color:var(--bg-3)] px-4 py-3 text-left text-[color:var(--ink-2)] hairline hover:bg-white/[0.04]"
             >
               {account.bankName}
             </button>
@@ -590,16 +856,18 @@ function QuickAssignExpenseModal({
 }) {
   const accounts = getAllAccounts(data);
   if (!entry) return null;
+
   return (
     <Modal isOpen={!!entry} onClose={onClose} title="Assign Account">
       <div className="space-y-4">
-        <div className="rounded-2xl border border-slate-800 bg-slate-950 p-4 text-sm text-slate-300">
+        <div className="rounded-[16px] bg-[color:var(--bg-3)] px-4 py-3 text-sm text-[color:var(--ink-2)] hairline">
           {entry.description || entry.category} - {formatCurrency(entry.amount)}
         </div>
         <div className="grid grid-cols-1 gap-2">
           {accounts.map((account) => (
             <button
               key={account.id}
+              type="button"
               onClick={() => {
                 updateData(
                   saveExpenseEntry(
@@ -615,7 +883,7 @@ function QuickAssignExpenseModal({
                 );
                 onClose();
               }}
-              className="rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-left hover:border-emerald-500/40"
+              className="rounded-[14px] bg-[color:var(--bg-3)] px-4 py-3 text-left text-[color:var(--ink-2)] hairline hover:bg-white/[0.04]"
             >
               {account.bankName}
             </button>

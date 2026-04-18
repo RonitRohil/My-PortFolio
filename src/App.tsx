@@ -96,7 +96,7 @@ function AppShell() {
   }
 
   return (
-    <Layout activeTab={activeTab} setActiveTab={setActiveTab} data={data} lastSync={lastSync} syncing={syncing} onSignOut={signOut}>
+    <Layout activeTab={activeTab} setActiveTab={setActiveTab} data={data} updateData={patchData} lastSync={lastSync} syncing={syncing} onSignOut={signOut}>
       {renderContent()}
     </Layout>
   );

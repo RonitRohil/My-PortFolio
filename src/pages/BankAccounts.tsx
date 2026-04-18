@@ -1,14 +1,95 @@
 import React, { useMemo, useState } from "react";
-import { Edit2, Eye, Plus, Trash2 } from "lucide-react";
-import { Badge, Button, Card, Input, Modal, Select } from "../components/UI";
-import { AccountType, BankAccount, PortfolioData } from "../types";
-import { formatCurrency, getAllAccounts, getRecentAccountTransactions, getAccountMonthlyStats, monthKey, updateAccountBalance } from "../lib/utils";
+import Icon from "../components/Icon";
+import { Badge, Button, Card, Input, Modal, Sheet, Select } from "../components/UI";
+import { AccountType, BankAccount, ExpenseCategory, IncomeSource, PaymentMethod, PortfolioData } from "../types";
+import {
+  formatCurrency,
+  getAccountMonthlyStats,
+  getAllAccounts,
+  getExpenseCategories,
+  getExpenseMethods,
+  getIncomeSources,
+  getRecentAccountTransactions,
+  saveExpenseEntry,
+  saveIncomeEntry,
+  saveTransferEntry,
+  updateAccountBalance,
+} from "../lib/utils";
 
-export default function BankAccounts({ data, updateData }: { data: PortfolioData; updateData: (d: Partial<PortfolioData>) => void }) {
+function compactINR(amount: number) {
+  const abs = Math.abs(amount);
+  const sign = amount < 0 ? "-" : "";
+  if (abs >= 1e7) return `${sign}Rs${(abs / 1e7).toFixed(abs >= 1e8 ? 1 : 2)} Cr`;
+  if (abs >= 1e5) return `${sign}Rs${(abs / 1e5).toFixed(abs >= 1e6 ? 1 : 2)} L`;
+  if (abs >= 1e3) return `${sign}Rs${(abs / 1e3).toFixed(1)}k`;
+  return `${sign}Rs${abs.toFixed(0)}`;
+}
+
+function accountColor(index: number) {
+  const colors = [
+    "oklch(.70 .14 235)",
+    "oklch(.70 .14 35)",
+    "oklch(.70 .14 295)",
+    "oklch(.70 .14 90)",
+  ];
+  return colors[index % colors.length];
+}
+
+function accountShort(name: string) {
+  if (/cash/i.test(name)) return "Rs";
+  return name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase() || "").join("").slice(0, 2);
+}
+
+function BankBadge({ name, color, size = 44 }: { name: string; color: string; size?: number }) {
+  return (
+    <div
+      className="grid place-items-center rounded-[12px] font-display text-[13px] font-semibold"
+      style={{
+        width: size,
+        height: size,
+        background: `color-mix(in oklch, ${color} 18%, transparent)`,
+        boxShadow: `inset 0 0 0 1px color-mix(in oklch, ${color} 40%, transparent)`,
+        color,
+      }}
+    >
+      {accountShort(name)}
+    </div>
+  );
+}
+
+function MiniBars({ values, color }: { values: number[]; color: string }) {
+  const max = Math.max(...values, 1);
+  return (
+    <div className="flex h-6 items-end gap-[3px]">
+      {values.map((value, index) => (
+        <div
+          key={index}
+          className="flex-1 rounded-[2px]"
+          style={{
+            height: `${Math.max(3, (value / max) * 24)}px`,
+            background: `color-mix(in oklch, ${color} ${50 + (value / max) * 40}%, transparent)`,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+export default function BankAccounts({
+  data,
+  updateData,
+}: {
+  data: PortfolioData;
+  updateData: (d: Partial<PortfolioData>) => void;
+}) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingAccount, setEditingAccount] = useState<BankAccount | null>(null);
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [quickAction, setQuickAction] = useState<{ kind: "income" | "expense" | "transfer"; accountId: string } | null>(null);
   const accounts = useMemo(() => getAllAccounts(data), [data]);
   const current = new Date();
+  const total = accounts.reduce((sum, account) => sum + account.balance, 0);
+  const openAccount = accounts.find((account) => account.id === openId) || null;
 
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -19,6 +100,7 @@ export default function BankAccounts({ data, updateData }: { data: PortfolioData
       setEditingAccount(null);
       return;
     }
+
     const account: BankAccount = {
       id: editingAccount?.id || `acc_${Date.now()}`,
       bankName: String(formData.get("bankName")),
@@ -28,6 +110,7 @@ export default function BankAccounts({ data, updateData }: { data: PortfolioData
       notes: String(formData.get("notes") || "") || undefined,
       isCash: editingAccount?.isCash,
     };
+
     updateData({
       bankAccounts: editingAccount
         ? accounts.map((item) => (item.id === editingAccount.id ? account : item))
@@ -38,82 +121,124 @@ export default function BankAccounts({ data, updateData }: { data: PortfolioData
   };
 
   return (
-    <div className="space-y-8">
-      <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
+    <div className="space-y-4 px-4 pt-4 pb-8 lg:px-0">
+      <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-3xl font-bold text-slate-100">Bank Accounts</h2>
-          <p className="text-slate-400">Every transaction now links back to the account it touched.</p>
+          <div className="font-display text-[20px] font-semibold">Accounts</div>
+          <div className="text-[11.5px] text-[color:var(--ink-4)]">{accounts.length} accounts · Synced locally</div>
         </div>
-        <Button onClick={() => setIsModalOpen(true)} className="flex items-center gap-2">
-          <Plus className="h-5 w-5" />
-          Add Account
+        <Button size="sm" variant="secondary" onClick={() => setIsModalOpen(true)} icon={<Icon name="plus" size={14} />}>
+          Add
         </Button>
       </div>
 
-      <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-        {accounts.map((account) => {
+      <Card className="relative overflow-hidden">
+        <div className="absolute inset-0 opacity-80" style={{ background: "radial-gradient(120% 80% at 0% 0%, color-mix(in oklch, var(--info) 20%, transparent), transparent 60%)" }} />
+        <div className="relative">
+          <div className="text-[10.5px] font-semibold uppercase tracking-[0.12em] text-[color:var(--ink-4)]">Total balance</div>
+          <div className="mt-1 font-display text-[30px] font-semibold tabular">{formatCurrency(total)}</div>
+          <div className="mt-2 flex items-center gap-2">
+            <Badge variant="info">Liquid</Badge>
+            <span className="text-[11.5px] text-[color:var(--ink-3)]">Across {accounts.length} accounts</span>
+          </div>
+        </div>
+      </Card>
+
+      <div className="space-y-2.5">
+        {accounts.map((account, index) => {
+          const color = accountColor(index);
           const stats = getAccountMonthlyStats(data, account.id, current.getFullYear(), current.getMonth());
-          const recentTransactions = getRecentAccountTransactions(data, account.id);
           return (
-            <div key={account.id}>
-            <Card className="min-w-0">
-              <div className="space-y-5">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <h3 className="text-xl font-bold text-slate-100">{account.bankName}</h3>
-                      <Badge variant={account.isCash ? "warning" : account.balance >= 0 ? "success" : "danger"}>{account.accountType}</Badge>
-                    </div>
-                    <div className="mt-1 text-sm text-slate-500">{account.accountNumber ? `**** ${account.accountNumber}` : "No account number"}</div>
-                  </div>
+            <Card key={account.id} padded={false} onClick={() => setOpenId(account.id)}>
+              <div className="flex items-center gap-3 p-4">
+                <BankBadge name={account.bankName} color={color} />
+                <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
-                      <button onClick={() => { setEditingAccount(account); setIsModalOpen(true); }} className="p-2 text-slate-400 hover:text-emerald-500"><Edit2 className="h-4 w-4" /></button>
-                      {!account.isCash && (
-                      <button onClick={() => updateData({ bankAccounts: accounts.filter((item) => item.id !== account.id) })} className="p-2 text-slate-400 hover:text-rose-500"><Trash2 className="h-4 w-4" /></button>
-                      )}
-                    </div>
+                    <div className="truncate text-[14.5px] font-semibold">{account.bankName}</div>
+                    <Badge variant="secondary">{account.accountType}</Badge>
+                  </div>
+                  <div className="mt-0.5 font-mono-num text-[11.5px] text-[color:var(--ink-4)]">{account.accountNumber || "Wallet"}</div>
                 </div>
-                <div className={`text-4xl font-black ${account.balance >= 0 ? "text-emerald-400" : "text-rose-400"}`}>{formatCurrency(account.balance)}</div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="rounded-2xl border border-slate-800 bg-slate-950 p-4">
-                    <div className="text-xs uppercase tracking-wider text-slate-500">This Month In</div>
-                    <div className="mt-2 font-bold text-emerald-400">{formatCurrency(stats.incomeTotal)}</div>
-                  </div>
-                  <div className="rounded-2xl border border-slate-800 bg-slate-950 p-4">
-                    <div className="text-xs uppercase tracking-wider text-slate-500">This Month Out</div>
-                    <div className="mt-2 font-bold text-rose-400">{formatCurrency(stats.expenseTotal)}</div>
-                  </div>
+                <div className="text-right">
+                  <div className="font-display text-[17px] font-semibold tabular">{formatCurrency(account.balance)}</div>
+                  <div className="text-[10.5px] text-[color:var(--ink-4)]">Available</div>
                 </div>
-                <div>
-                  <div className="mb-3 flex items-center justify-between">
-                    <div className="text-sm font-semibold text-slate-300">Last 5 Transactions</div>
-                    <div className="text-xs text-slate-500">{monthKey(new Date())}</div>
-                  </div>
-                  <div className="space-y-2">
-                    {recentTransactions.length === 0 && <div className="rounded-xl border border-slate-800 bg-slate-950 p-4 text-sm text-slate-500">No transactions yet.</div>}
-                    {recentTransactions.map((transaction) => (
-                      <div key={`${transaction.kind}-${transaction.id}`} className="flex items-center justify-between rounded-xl border border-slate-800 bg-slate-950 px-4 py-3">
-                        <div>
-                          <div className="font-medium text-slate-200">{transaction.description || ("source" in transaction ? transaction.source : "category" in transaction ? transaction.category : "Transfer")}</div>
-                          <div className="text-xs text-slate-500">{transaction.date}</div>
-                        </div>
-                        <div className={`font-bold ${transaction.kind === "income" ? "text-emerald-400" : transaction.kind === "expense" ? "text-rose-400" : "text-slate-200"}`}>
-                          {transaction.kind === "income" ? "+" : transaction.kind === "expense" ? "-" : "<->"} {formatCurrency(transaction.amount)}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                <button className="inline-flex items-center gap-2 text-sm text-emerald-400">
-                  <Eye className="h-4 w-4" />
-                  View All
-                </button>
+              </div>
+              <div className="px-4 pb-3">
+                <MiniBars values={[stats.incomeTotal, stats.expenseTotal, Math.max(1, account.balance / 10), stats.transfersTotal || 1, stats.incomeTotal / 2 || 1, stats.expenseTotal / 2 || 1]} color={color} />
               </div>
             </Card>
-            </div>
           );
         })}
       </div>
+
+      <Sheet open={!!openAccount} onClose={() => setOpenId(null)} title={openAccount?.bankName || ""} subtitle="Quick actions">
+        {openAccount && (
+          <>
+            <div className="mb-4 grid grid-cols-4 gap-2">
+              {[
+                { id: "inc", icon: "arrow-down-right", label: "Income", tone: "var(--pos)" },
+                { id: "exp", icon: "arrow-up-right", label: "Expense", tone: "var(--neg)" },
+                { id: "xfer", icon: "swap", label: "Transfer", tone: "var(--info)" },
+                { id: "stmt", icon: "download", label: "Statement", tone: "var(--violet)" },
+              ].map((action) => (
+                <button
+                  key={action.id}
+                  type="button"
+                  onClick={() => {
+                    if (action.id === "stmt") {
+                      exportAccountStatement(openAccount, data);
+                      return;
+                    }
+                    setOpenId(null);
+                    setQuickAction({
+                      kind: action.id === "inc" ? "income" : action.id === "exp" ? "expense" : "transfer",
+                      accountId: openAccount.id,
+                    });
+                  }}
+                  className="flex flex-col items-center gap-1.5 rounded-[14px] bg-[color:var(--bg-3)] py-3 hairline transition hover:bg-white/[0.04] active:scale-[0.98]"
+                >
+                  <div className="grid h-8 w-8 place-items-center rounded-[10px]" style={{ background: `color-mix(in oklch, ${action.tone} 18%, transparent)`, color: action.tone }}>
+                    <Icon name={action.icon as any} size={16} />
+                  </div>
+                  <span className="text-[10.5px] font-semibold text-[color:var(--ink-2)]">{action.label}</span>
+                </button>
+              ))}
+            </div>
+
+            <div className="grid grid-cols-3 gap-2">
+              <Card className="bg-[color:var(--bg-3)]" padded>
+                <div className="text-[10px] uppercase tracking-wider text-[color:var(--ink-4)]">Balance</div>
+                <div className="mt-1 font-mono-num text-[13px] font-semibold">{compactINR(openAccount.balance)}</div>
+              </Card>
+              <Card className="bg-[color:var(--bg-3)]" padded>
+                <div className="text-[10px] uppercase tracking-wider text-[color:var(--ink-4)]">In</div>
+                <div className="mt-1 font-mono-num text-[13px] font-semibold text-[color:var(--pos)]">{compactINR(getAccountMonthlyStats(data, openAccount.id, current.getFullYear(), current.getMonth()).incomeTotal)}</div>
+              </Card>
+              <Card className="bg-[color:var(--bg-3)]" padded>
+                <div className="text-[10px] uppercase tracking-wider text-[color:var(--ink-4)]">Out</div>
+                <div className="mt-1 font-mono-num text-[13px] font-semibold text-[color:var(--neg)]">{compactINR(getAccountMonthlyStats(data, openAccount.id, current.getFullYear(), current.getMonth()).expenseTotal)}</div>
+              </Card>
+            </div>
+
+            <div className="mb-1 mt-4 px-1 text-[11.5px] font-semibold uppercase tracking-[0.08em] text-[color:var(--ink-4)]">Recent</div>
+            <div className="overflow-hidden rounded-[14px] bg-[color:var(--bg-3)] hairline">
+              {getRecentAccountTransactions(data, openAccount.id).length === 0 && (
+                <div className="px-4 py-4 text-[12px] text-[color:var(--ink-4)]">No transactions yet.</div>
+              )}
+              {getRecentAccountTransactions(data, openAccount.id).map((tx, index) => (
+                <div key={`${tx.kind}-${tx.id}`} className={`flex items-center gap-2.5 px-3 py-2.5 ${index > 0 ? "border-t border-white/[0.05]" : ""}`}>
+                  <span className="h-2 w-2 rounded-full" style={{ background: tx.kind === "income" ? "var(--pos)" : tx.kind === "transfer" ? "var(--info)" : "var(--neg)" }} />
+                  <div className="flex-1 truncate text-[12.5px] text-[color:var(--ink)]">
+                    {tx.description || ("source" in tx ? tx.source : "category" in tx ? tx.category : "Transfer")}
+                  </div>
+                  <div className="font-mono-num text-[12.5px] tabular text-[color:var(--ink-2)]">{compactINR(tx.amount)}</div>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </Sheet>
 
       <Modal isOpen={isModalOpen} onClose={() => { setIsModalOpen(false); setEditingAccount(null); }} title={editingAccount ? "Edit Account" : "Add Account"}>
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -125,16 +250,223 @@ export default function BankAccounts({ data, updateData }: { data: PortfolioData
           <Input label="Current Balance" name="balance" type="number" required defaultValue={editingAccount?.balance} />
           {!editingAccount?.isCash && <Input label="Notes" name="notes" defaultValue={editingAccount?.notes} />}
           {editingAccount?.isCash && (
-            <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 px-4 py-3 text-sm text-amber-200">
-              Cash is a protected account. You can update its live balance here, but it cannot be deleted or renamed.
+            <div className="rounded-[14px] bg-[color:var(--bg-3)] px-4 py-3 text-sm text-[color:var(--warn)] hairline">
+              Cash is a protected account. You can update its balance here, but it cannot be deleted or renamed.
             </div>
           )}
-          <div className="flex gap-3 pt-4">
-            <Button type="submit" className="flex-1">{editingAccount ? "Update Account" : "Add Account"}</Button>
-            <Button type="button" variant="secondary" onClick={() => setIsModalOpen(false)}>Cancel</Button>
+          <div className="flex gap-3 pt-2">
+            <Button type="submit" block>{editingAccount ? "Update Account" : "Add Account"}</Button>
+            <Button type="button" variant="secondary" onClick={() => { setIsModalOpen(false); setEditingAccount(null); }}>Cancel</Button>
           </div>
         </form>
       </Modal>
+
+      <AccountQuickActionModal
+        action={quickAction}
+        data={data}
+        updateData={updateData}
+        onClose={() => setQuickAction(null)}
+      />
     </div>
+  );
+}
+
+function exportAccountStatement(account: BankAccount, data: PortfolioData) {
+  const statementRows = [
+    ...data.income
+      .filter((entry) => entry.toAccountId === account.id)
+      .map((entry) => ({
+        date: entry.date,
+        type: "Income",
+        category: entry.source,
+        counterparty: account.bankName,
+        amount: entry.amount,
+        description: entry.description || "",
+      })),
+    ...data.expenses
+      .filter((entry) => entry.fromAccountId === account.id)
+      .map((entry) => ({
+        date: entry.date,
+        type: "Expense",
+        category: entry.category,
+        counterparty: entry.paymentMethod,
+        amount: -entry.amount,
+        description: entry.description || "",
+      })),
+    ...data.transfers
+      .filter((entry) => entry.fromAccountId === account.id || entry.toAccountId === account.id)
+      .map((entry) => ({
+        date: entry.date,
+        type: entry.fromAccountId === account.id ? "Transfer Out" : "Transfer In",
+        category: "Transfer",
+        counterparty: entry.fromAccountId === account.id ? entry.toAccountName : entry.fromAccountName,
+        amount: entry.fromAccountId === account.id ? -entry.amount : entry.amount,
+        description: entry.description || "",
+      })),
+  ].sort((a, b) => b.date.localeCompare(a.date));
+
+  const header = "Date,Type,Category,Counterparty,Amount,Description";
+  const rows = statementRows.map((row) =>
+    [
+      row.date,
+      row.type,
+      csvCell(row.category),
+      csvCell(row.counterparty),
+      row.amount.toFixed(2),
+      csvCell(row.description),
+    ].join(","),
+  );
+
+  const blob = new Blob([[header, ...rows].join("\n")], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = `${account.bankName.replace(/\s+/g, "_").toLowerCase()}_statement.csv`;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+function csvCell(value: string) {
+  return `"${String(value || "").replace(/"/g, '""')}"`;
+}
+
+function AccountQuickActionModal({
+  action,
+  data,
+  updateData,
+  onClose,
+}: {
+  action: { kind: "income" | "expense" | "transfer"; accountId: string } | null;
+  data: PortfolioData;
+  updateData: (d: Partial<PortfolioData>) => void;
+  onClose: () => void;
+}) {
+  const accounts = getAllAccounts(data);
+  const account = accounts.find((item) => item.id === action?.accountId) || null;
+  const [amount, setAmount] = useState("");
+  const [category, setCategory] = useState<ExpenseCategory>("");
+  const [method, setMethod] = useState<PaymentMethod>("UPI");
+  const [source, setSource] = useState<IncomeSource>("Salary");
+  const [toAccountId, setToAccountId] = useState("");
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [note, setNote] = useState("");
+
+  const expenseCategories = getExpenseCategories(data);
+  const incomeSources = getIncomeSources(data);
+  const methods = getExpenseMethods();
+  const transferTargets = accounts.filter((item) => item.id !== account?.id);
+
+  if (!action || !account) return null;
+
+  const resetAndClose = () => {
+    setAmount("");
+    setCategory("");
+    setMethod("UPI");
+    setSource("Salary");
+    setToAccountId("");
+    setDate(new Date().toISOString().slice(0, 10));
+    setNote("");
+    onClose();
+  };
+
+  const handleSave = () => {
+    const numericAmount = Number(amount);
+    if (!numericAmount) return;
+
+    if (action.kind === "income") {
+      updateData(saveIncomeEntry(data, {
+        id: crypto.randomUUID(),
+        date,
+        amount: numericAmount,
+        source: source || incomeSources[0] || "Other",
+        toAccountId: account.id,
+        toAccountName: account.bankName,
+        description: note,
+      }));
+      resetAndClose();
+      return;
+    }
+
+    if (action.kind === "expense") {
+      updateData(saveExpenseEntry(data, {
+        id: crypto.randomUUID(),
+        date,
+        amount: numericAmount,
+        category: (category || expenseCategories[0] || "Other") as ExpenseCategory,
+        fromAccountId: account.id,
+        fromAccountName: account.bankName,
+        paymentMethod: method,
+        description: note,
+      }));
+      resetAndClose();
+      return;
+    }
+
+    const target = transferTargets.find((item) => item.id === toAccountId) || transferTargets[0];
+    if (!target) return;
+
+    updateData(saveTransferEntry(data, {
+      id: crypto.randomUUID(),
+      date,
+      amount: numericAmount,
+      fromAccountId: account.id,
+      fromAccountName: account.bankName,
+      toAccountId: target.id,
+      toAccountName: target.bankName,
+      description: note,
+      fees: 0,
+    }));
+    resetAndClose();
+  };
+
+  const title = action.kind === "income" ? "Add Income" : action.kind === "expense" ? "Add Expense" : "Transfer Funds";
+
+  return (
+    <Modal isOpen={!!action} onClose={resetAndClose} title={title} mobileSheet>
+      <div className="space-y-4">
+        <Card className="bg-[color:var(--bg-3)]">
+          <div className="text-[10px] uppercase tracking-[0.12em] text-[color:var(--ink-4)]">
+            {action.kind === "transfer" ? "From account" : "Account"}
+          </div>
+          <div className="mt-1 text-[14px] font-semibold">{account.bankName}</div>
+          <div className="mt-0.5 text-[11.5px] text-[color:var(--ink-4)]">{account.accountNumber || "Wallet"}</div>
+        </Card>
+
+        <Input label="Amount" type="number" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="0" />
+
+        {action.kind === "expense" && (
+          <>
+            <Select label="Category" value={category || expenseCategories[0] || ""} onChange={(event) => setCategory(event.target.value as ExpenseCategory)}>
+              {expenseCategories.map((item) => <option key={item} value={item}>{item}</option>)}
+            </Select>
+            <Select label="Method" value={method} onChange={(event) => setMethod(event.target.value as PaymentMethod)}>
+              {methods.map((item) => <option key={item} value={item}>{item}</option>)}
+            </Select>
+          </>
+        )}
+
+        {action.kind === "income" && (
+          <Select label="Source" value={source} onChange={(event) => setSource(event.target.value as IncomeSource)}>
+            {incomeSources.map((item) => <option key={item} value={item}>{item}</option>)}
+          </Select>
+        )}
+
+        {action.kind === "transfer" && (
+          <Select label="To Account" value={toAccountId || transferTargets[0]?.id || ""} onChange={(event) => setToAccountId(event.target.value)}>
+            {transferTargets.map((item) => <option key={item.id} value={item.id}>{item.bankName}</option>)}
+          </Select>
+        )}
+
+        <Input label="Date" type="date" value={date} onChange={(event) => setDate(event.target.value)} />
+        <Input label="Note" value={note} onChange={(event) => setNote(event.target.value)} placeholder="Optional description" />
+
+        <div className="flex gap-3 pt-2">
+          <Button onClick={handleSave} block disabled={!amount}>
+            Save
+          </Button>
+          <Button variant="secondary" onClick={resetAndClose}>Cancel</Button>
+        </div>
+      </div>
+    </Modal>
   );
 }

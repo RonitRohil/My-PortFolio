@@ -1,161 +1,211 @@
 import React, { useState } from "react";
-import { PortfolioData, Loan, LoanType } from "../types";
-import { Card, Button, Input, Select, Table, Modal, Badge } from "../components/UI";
-import { Plus, Trash2, Edit2, CreditCard, AlertCircle } from "lucide-react";
-import { formatCurrency, formatDate } from "../lib/utils";
+import Icon from "../components/Icon";
+import { Badge, Button, Card, Input, Modal, Select } from "../components/UI";
+import { Loan, LoanType, PortfolioData } from "../types";
+import { formatCurrency } from "../lib/utils";
 
-export default function LoansTracker({ data, updateData }: { data: PortfolioData, updateData: (d: Partial<PortfolioData>) => void }) {
+function compactINR(amount: number) {
+  const abs = Math.abs(amount);
+  const sign = amount < 0 ? "-" : "";
+  if (abs >= 1e7) return `${sign}Rs${(abs / 1e7).toFixed(abs >= 1e8 ? 1 : 2)} Cr`;
+  if (abs >= 1e5) return `${sign}Rs${(abs / 1e5).toFixed(abs >= 1e6 ? 1 : 2)} L`;
+  if (abs >= 1e3) return `${sign}Rs${(abs / 1e3).toFixed(1)}k`;
+  return `${sign}Rs${abs.toFixed(0)}`;
+}
+
+function Ring({
+  value,
+  size = 44,
+  stroke = 6,
+  color = "var(--pos)",
+}: {
+  value: number;
+  size?: number;
+  stroke?: number;
+  color?: string;
+}) {
+  const radius = (size - stroke) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const dashOffset = circumference * (1 - Math.max(0, Math.min(1, value)));
+
+  return (
+    <div className="relative inline-flex items-center justify-center" style={{ width: size, height: size }}>
+      <svg width={size} height={size} className="-rotate-90">
+        <circle cx={size / 2} cy={size / 2} r={radius} fill="none" className="ring-track" strokeWidth={stroke} />
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          fill="none"
+          stroke={color}
+          strokeWidth={stroke}
+          strokeLinecap="round"
+          strokeDasharray={circumference}
+          strokeDashoffset={dashOffset}
+          className="ring-value"
+        />
+      </svg>
+      <div className="absolute inset-0 flex items-center justify-center font-mono-num text-[10.5px] font-semibold">{Math.round(value * 100)}%</div>
+    </div>
+  );
+}
+
+export default function LoansTracker({
+  data,
+  updateData,
+}: {
+  data: PortfolioData;
+  updateData: (d: Partial<PortfolioData>) => void;
+}) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingLoan, setEditingLoan] = useState<Loan | null>(null);
 
-  const [sortConfig, setSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' } | null>(null);
+  const totalOutstanding = data.loans.reduce((sum, loan) => sum + loan.outstandingBalance, 0);
+  const totalEmi = data.loans.reduce((sum, loan) => sum + loan.emiAmount, 0);
 
-  const totalOutstanding = data.loans.reduce((sum, l) => sum + l.outstandingBalance, 0);
-
-  const sortedLoans = [...data.loans].sort((a, b) => {
-    if (!sortConfig) return 0;
-    const { key, direction } = sortConfig;
-    const valA = a[key as keyof Loan];
-    const valB = b[key as keyof Loan];
-    if (valA < valB) return direction === 'asc' ? -1 : 1;
-    if (valA > valB) return direction === 'asc' ? 1 : -1;
-    return 0;
-  });
-
-  const handleSort = (key: string) => {
-    setSortConfig((prev) => {
-      if (prev?.key === key) {
-        return { key, direction: prev.direction === 'asc' ? 'desc' : 'asc' };
-      }
-      return { key, direction: 'asc' };
-    });
-  };
-
-  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    const formData = new FormData(e.currentTarget);
+  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const formData = new FormData(event.currentTarget);
     const loan: Loan = {
       id: editingLoan?.id || Date.now().toString(),
-      lenderName: formData.get("lenderName") as string,
+      lenderName: String(formData.get("lenderName")),
       loanType: formData.get("loanType") as LoanType,
       principalAmount: Number(formData.get("principalAmount")),
       outstandingBalance: Number(formData.get("outstandingBalance")),
       emiAmount: Number(formData.get("emiAmount")),
       interestRate: Number(formData.get("interestRate")),
       emiDate: Number(formData.get("emiDate")),
-      startDate: formData.get("startDate") as string,
-      endDate: formData.get("endDate") as string,
+      startDate: String(formData.get("startDate")),
+      endDate: String(formData.get("endDate")),
     };
 
-    if (editingLoan) {
-      updateData({ loans: data.loans.map(l => l.id === editingLoan.id ? loan : l) });
-    } else {
-      updateData({ loans: [...data.loans, loan] });
-    }
+    updateData({
+      loans: editingLoan ? data.loans.map((item) => item.id === editingLoan.id ? loan : item) : [...data.loans, loan],
+    });
     setIsModalOpen(false);
     setEditingLoan(null);
   };
 
-  const deleteLoan = (id: string) => {
-    if (confirm("Are you sure you want to delete this loan entry?")) {
-      updateData({ loans: data.loans.filter(l => l.id !== id) });
-    }
-  };
-
   return (
-    <div className="space-y-8">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h2 className="text-3xl font-bold text-slate-100">Loans & EMI</h2>
-          <p className="text-slate-400">Track your liabilities and monthly EMI obligations.</p>
+    <div className="space-y-4 px-4 pt-4 pb-8 lg:px-0">
+      <div className="flex items-center justify-between">
+        <div className="min-w-0 flex-1">
+          <div className="font-display text-[20px] font-semibold whitespace-nowrap">Loans</div>
+          <div className="truncate text-[11.5px] text-[color:var(--ink-4)]">{data.loans.length} active · EMIs tracked</div>
         </div>
-        <Button onClick={() => setIsModalOpen(true)} className="flex items-center gap-2">
-          <Plus className="w-5 h-5" />
-          Add Loan
+        <Button size="sm" variant="secondary" onClick={() => setIsModalOpen(true)} icon={<Icon name="plus" size={14} />}>
+          Add
         </Button>
       </div>
 
-      <Card className="bg-rose-500/5 border-rose-500/20">
-        <div className="flex items-center gap-4">
-          <div className="p-3 bg-rose-500/20 rounded-xl">
-            <CreditCard className="w-8 h-8 text-rose-500" />
-          </div>
-          <div>
-            <p className="text-sm text-rose-500/80 font-bold uppercase tracking-wider">Total Outstanding Debt</p>
-            <h3 className="text-4xl font-black text-rose-500">{formatCurrency(totalOutstanding)}</h3>
-          </div>
-        </div>
-      </Card>
+      <div className="grid grid-cols-2 gap-3">
+        <Card>
+          <div className="text-[10.5px] font-semibold uppercase tracking-[0.1em] text-[color:var(--ink-4)]">Outstanding</div>
+          <div className="mt-1 font-display text-[22px] font-semibold tabular text-[color:var(--neg)]">{compactINR(totalOutstanding)}</div>
+          <div className="text-[11px] text-[color:var(--ink-4)]">All loans combined</div>
+        </Card>
+        <Card>
+          <div className="text-[10.5px] font-semibold uppercase tracking-[0.1em] text-[color:var(--ink-4)]">Monthly EMI</div>
+          <div className="mt-1 font-display text-[22px] font-semibold tabular">{compactINR(totalEmi)}</div>
+          <div className="text-[11px] text-[color:var(--ink-4)]">Current monthly obligation</div>
+        </Card>
+      </div>
 
-      <Card>
-        {data.loans.length === 0 ? (
-          <div className="text-center py-12 text-slate-500">No active loans recorded.</div>
-        ) : (
-          <Table 
-            headers={[
-              { label: "Lender", key: "lenderName" }, 
-              { label: "Type", key: "loanType" }, 
-              { label: "Outstanding", key: "outstandingBalance" }, 
-              { label: "EMI", key: "emiAmount" }, 
-              { label: "EMI Date", key: "emiDate" }, 
-              { label: "Actions" }
-            ]}
-            onSort={handleSort}
-            sortConfig={sortConfig || undefined}
-          >
-            {sortedLoans.map((loan) => (
-              <tr key={loan.id} className="hover:bg-slate-800/30 transition-colors">
-                <td className="px-4 py-4 font-semibold text-slate-200">{loan.lenderName}</td>
-                <td className="px-4 py-4"><Badge variant="danger">{loan.loanType}</Badge></td>
-                <td className="px-4 py-4 font-bold text-rose-500">{formatCurrency(loan.outstandingBalance)}</td>
-                <td className="px-4 py-4 text-slate-300">{formatCurrency(loan.emiAmount)}</td>
-                <td className="px-4 py-4">
-                  <div className="flex items-center gap-2 text-slate-400">
-                    <AlertCircle className="w-4 h-4 text-amber-500" />
-                    Day {loan.emiDate}
-                  </div>
-                </td>
-                <td className="px-4 py-4">
-                  <div className="flex items-center gap-2">
-                    <button onClick={() => { setEditingLoan(loan); setIsModalOpen(true); }} className="p-2 text-slate-400 hover:text-emerald-500"><Edit2 className="w-4 h-4" /></button>
-                    <button onClick={() => deleteLoan(loan.id)} className="p-2 text-slate-400 hover:text-rose-500"><Trash2 className="w-4 h-4" /></button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </Table>
-        )}
-      </Card>
+      <div className="space-y-2.5">
+        {data.loans.map((loan) => {
+          const paid = Math.max(0, loan.principalAmount - loan.outstandingBalance);
+          const pct = loan.principalAmount > 0 ? paid / loan.principalAmount : 0;
+          const typeIcon = {
+            Home: "bank",
+            Personal: "wallet",
+            Vehicle: "credit-card",
+            Education: "inbox",
+            "Credit Card": "credit-card",
+            Other: "credit-card",
+          } as const;
 
-      <Modal 
-        isOpen={isModalOpen} 
-        onClose={() => { setIsModalOpen(false); setEditingLoan(null); }} 
-        title={editingLoan ? "Edit Loan" : "Add Loan"}
-      >
-        <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          return (
+            <Card key={loan.id}>
+              <div className="flex items-start gap-3">
+                <div
+                  className="grid h-11 w-11 place-items-center rounded-[12px]"
+                  style={{
+                    background: "color-mix(in oklch, var(--neg) 15%, transparent)",
+                    color: "var(--neg)",
+                    boxShadow: "inset 0 0 0 1px color-mix(in oklch, var(--neg) 35%, transparent)",
+                  }}
+                >
+                  <Icon name={typeIcon[loan.loanType] as any} size={18} />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5">
+                    <div className="truncate text-[14px] font-semibold">{loan.lenderName}</div>
+                    <Badge variant="secondary">{loan.loanType}</Badge>
+                  </div>
+                  <div className="mt-0.5 text-[11.5px] text-[color:var(--ink-4)]">EMI day {loan.emiDate} · {loan.interestRate}% · ends {loan.endDate.slice(0, 7)}</div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Ring value={pct} />
+                  <div className="flex flex-col gap-1">
+                    <button onClick={() => { setEditingLoan(loan); setIsModalOpen(true); }} className="grid h-8 w-8 place-items-center rounded-[10px] text-[color:var(--ink-4)] hover:bg-white/[0.05]">
+                      <Icon name="pencil" size={14} />
+                    </button>
+                    <button onClick={() => updateData({ loans: data.loans.filter((item) => item.id !== loan.id) })} className="grid h-8 w-8 place-items-center rounded-[10px] text-[color:var(--ink-4)] hover:bg-white/[0.05] hover:text-[color:var(--neg)]">
+                      <Icon name="trash" size={14} />
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <div className="mt-3 grid grid-cols-3 gap-2">
+                <StatMini label="Outstanding" value={compactINR(loan.outstandingBalance)} color="var(--neg)" />
+                <StatMini label="EMI" value={compactINR(loan.emiAmount)} />
+                <StatMini label="Paid" value={compactINR(paid)} color="var(--pos)" />
+              </div>
+              <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/5">
+                <div className="h-full rounded-full" style={{ width: `${pct * 100}%`, background: "linear-gradient(90deg, var(--pos), var(--accent))" }} />
+              </div>
+            </Card>
+          );
+        })}
+        {data.loans.length === 0 && <Card className="py-10 text-center text-[color:var(--ink-4)]">No loans recorded yet.</Card>}
+      </div>
+
+      <Modal isOpen={isModalOpen} onClose={() => { setIsModalOpen(false); setEditingLoan(null); }} title={editingLoan ? "Edit Loan" : "Add Loan"}>
+        <form onSubmit={handleSubmit} className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <Input label="Lender Name" name="lenderName" required defaultValue={editingLoan?.lenderName} className="md:col-span-2" />
           <Select label="Loan Type" name="loanType" defaultValue={editingLoan?.loanType || "Personal"}>
-            <option value="Home">Home</option>
-            <option value="Personal">Personal</option>
-            <option value="Vehicle">Vehicle</option>
-            <option value="Education">Education</option>
-            <option value="Credit Card">Credit Card</option>
-            <option value="Other">Other</option>
+            {["Home", "Personal", "Vehicle", "Education", "Credit Card", "Other"].map((type) => <option key={type} value={type}>{type}</option>)}
           </Select>
-          <Input label="Interest Rate (%)" name="interestRate" type="number" step="0.01" required defaultValue={editingLoan?.interestRate} />
+          <Input label="Interest Rate (%)" name="interestRate" type="number" required defaultValue={editingLoan?.interestRate} />
           <Input label="Principal Amount" name="principalAmount" type="number" required defaultValue={editingLoan?.principalAmount} />
           <Input label="Outstanding Balance" name="outstandingBalance" type="number" required defaultValue={editingLoan?.outstandingBalance} />
           <Input label="EMI Amount" name="emiAmount" type="number" required defaultValue={editingLoan?.emiAmount} />
-          <Input label="EMI Date (Day of Month)" name="emiDate" type="number" min={1} max={31} required defaultValue={editingLoan?.emiDate} />
+          <Input label="EMI Date" name="emiDate" type="number" min={1} max={31} required defaultValue={editingLoan?.emiDate} />
           <Input label="Start Date" name="startDate" type="date" required defaultValue={editingLoan?.startDate} />
           <Input label="End Date" name="endDate" type="date" required defaultValue={editingLoan?.endDate} />
-          
-          <div className="md:col-span-2 pt-4 flex gap-3">
-            <Button type="submit" className="flex-1">{editingLoan ? "Update" : "Add"}</Button>
+          <div className="flex gap-3 pt-2 md:col-span-2">
+            <Button type="submit" block>{editingLoan ? "Update" : "Add"}</Button>
             <Button type="button" variant="secondary" onClick={() => { setIsModalOpen(false); setEditingLoan(null); }}>Cancel</Button>
           </div>
         </form>
       </Modal>
+    </div>
+  );
+}
+
+function StatMini({
+  label,
+  value,
+  color,
+}: {
+  label: string;
+  value: string;
+  color?: string;
+}) {
+  return (
+    <div className="rounded-[12px] bg-[color:var(--bg-3)] px-3 py-2 hairline">
+      <div className="text-[10px] uppercase tracking-wider text-[color:var(--ink-4)]">{label}</div>
+      <div className="font-mono-num text-[13px] font-semibold tabular" style={color ? { color } : undefined}>{value}</div>
     </div>
   );
 }
