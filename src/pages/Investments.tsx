@@ -21,7 +21,13 @@ import {
   getCombinedStockHoldings,
   getComputedSipInvested,
   getMutualFundInvestedAmount,
+  parseCSV,
 } from "../lib/utils";
+import {
+  getTickerFromName,
+  isSameStock,
+  normalizeStockName,
+} from "../utils/stockNormalizer";
 
 type InvestmentTab = "mf" | "stocks" | "fd" | "rd";
 
@@ -51,19 +57,19 @@ function SegmentedTabs({
   ];
 
   return (
-    <div className="inline-flex rounded-full bg-[color:var(--bg-3)] p-1 hairline">
+    <div className="inline-flex min-w-max rounded-full bg-[color:var(--bg-3)] p-1 hairline">
       {options.map((option) => {
         const active = value === option.id;
         return (
           <button
             key={option.id}
             onClick={() => onChange(option.id)}
-            className={`inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-[13px] font-semibold transition ${
+            className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-3.5 py-1.5 text-[12.5px] font-semibold transition ${
               active ? "bg-[color:var(--accent)] text-[color:var(--bg)]" : "text-[color:var(--ink-3)] hover:text-[color:var(--ink)]"
             }`}
           >
             {option.label}
-            <span className={`rounded-full px-1.5 text-[10px] font-mono-num ${active ? "bg-black/20" : "bg-white/[0.05]"}`}>{counts[option.id]}</span>
+            <span className={`rounded-full px-1.5 py-[1px] text-[9.5px] font-mono-num ${active ? "bg-black/20" : "bg-white/[0.05]"}`}>{counts[option.id]}</span>
           </button>
         );
       })}
@@ -146,6 +152,73 @@ export default function Investments({
     }
   };
 
+  const handleImport = (portfolioId: string, broker: BrokerType) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".csv";
+    input.onchange = async (event: Event) => {
+      const file = (event.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+
+      const rows = parseCSV(await file.text());
+      const portfolio = data.investments.stockPortfolios.find((item) => item.id === portfolioId);
+      if (!portfolio) return;
+
+      const findCol = (row: Record<string, string>, aliases: string[]) => {
+        const key = Object.keys(row).find((candidate) => aliases.map((alias) => alias.toLowerCase()).includes(candidate.toLowerCase().trim()));
+        return key ? row[key] : undefined;
+      };
+      const parseNum = (value?: string) => Number((value || "").replace(/[^0-9.-]/g, ""));
+      const holdings: Stock[] = [];
+
+      rows.forEach((row) => {
+        let ticker = "";
+        let companyName = "";
+
+        if (broker === "Groww") {
+          companyName = normalizeStockName(findCol(row, ["Stock Name", "Stock", "Company", "Instrument"]) || "");
+          ticker = ((findCol(row, ["Ticker", "Symbol"]) || getTickerFromName(companyName)) as string).toUpperCase();
+        } else if (broker === "Zerodha") {
+          ticker = ((findCol(row, ["Instrument", "Symbol", "Ticker"]) || "") as string).toUpperCase();
+          companyName = normalizeStockName(ticker);
+        } else {
+          companyName = normalizeStockName(findCol(row, ["Stock Name", "Company", "Stock"]) || "");
+          ticker = ((findCol(row, ["Ticker", "Symbol", "Instrument"]) || getTickerFromName(companyName)) as string).toUpperCase();
+        }
+
+        const quantity = parseNum(findCol(row, ["Quantity", "Qty", "Qty.", "Shares"]));
+        const avgBuyPrice = parseNum(findCol(row, ["Average buy price", "Average Price", "Avg Price", "Avg Cost", "Avg. cost"]));
+        const currentPrice = parseNum(findCol(row, ["Closing price", "Current Price", "LTP", "Market Price"]));
+
+        if (!companyName || !ticker || quantity <= 0) return;
+
+        const existing = portfolio.holdings.find((item) => isSameStock(item.companyName, companyName));
+        holdings.push({
+          id: existing?.id || Math.random().toString(36).slice(2, 11),
+          companyName,
+          ticker,
+          quantity,
+          avgBuyPrice,
+          currentPrice: currentPrice > 0 ? currentPrice : existing?.currentPrice || avgBuyPrice,
+        });
+      });
+
+      if (holdings.length === 0) {
+        alert("No supported stock rows were found in that CSV.");
+        return;
+      }
+
+      updateData({
+        investments: {
+          ...data.investments,
+          stockPortfolios: data.investments.stockPortfolios.map((item) => (item.id === portfolioId ? { ...item, holdings } : item)),
+        },
+      });
+      alert("CSV import completed.");
+    };
+    input.click();
+  };
+
   return (
     <div className="space-y-4 px-4 pt-4 pb-8 lg:px-0">
       <div className="flex items-center justify-between">
@@ -196,7 +269,7 @@ export default function Investments({
         </div>
       </Card>
 
-      <div className="overflow-x-auto no-scrollbar">
+      <div className="-mx-4 overflow-x-auto px-4 no-scrollbar lg:mx-0 lg:px-0">
         <SegmentedTabs value={subTab} onChange={setSubTab} counts={counts} />
       </div>
 
@@ -299,8 +372,9 @@ export default function Investments({
                     <div className="font-display text-[15px] font-semibold">{activePortfolio.name}</div>
                     <div className="text-[11.5px] text-[color:var(--ink-4)]">{activePortfolio.ownerName} · {activePortfolio.broker}</div>
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap gap-2">
                     <Button size="sm" variant="secondary" onClick={() => { setEditingPortfolio(activePortfolio); setIsPortfolioModalOpen(true); }}>Edit</Button>
+                    <Button size="sm" variant="secondary" onClick={() => handleImport(activePortfolio.id, activePortfolio.broker)}>Import CSV</Button>
                     <Button size="sm" variant="secondary" onClick={() => { setEditingItem(null); setIsItemModalOpen(true); }}>Add holding</Button>
                   </div>
                 </div>

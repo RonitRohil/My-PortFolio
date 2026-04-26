@@ -54,7 +54,9 @@ body {
 .phone-shell {
   width: 100%;
   max-width: 480px;
+  height: 100dvh;
   min-height: 100dvh;
+  overflow: hidden;
   background: var(--bg);
   position: relative;
 }
@@ -70,6 +72,7 @@ body {
 @media (min-width: 1024px) {
   .phone-shell {
     max-width: none;
+    height: 100dvh;
     min-height: 100dvh;
   }
 

@@ -104,7 +104,7 @@ function KindTabs({
   ];
 
   return (
-    <div className="inline-flex rounded-full bg-[color:var(--bg-3)] p-1 hairline">
+    <div className="inline-flex min-w-max rounded-full bg-[color:var(--bg-3)] p-1 hairline">
       {options.map((option) => {
         const active = value === option.id;
         return (
@@ -112,13 +112,13 @@ function KindTabs({
             key={option.id}
             type="button"
             onClick={() => onChange(option.id)}
-            className={`relative inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-[13px] font-semibold transition ${
+            className={`relative inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-3.5 py-1.5 text-[12.5px] font-semibold transition ${
               active ? "bg-[color:var(--accent)] text-[color:var(--bg)]" : "text-[color:var(--ink-3)] hover:text-[color:var(--ink)]"
             }`}
           >
             {option.icon && <Icon name={option.icon} size={14} strokeWidth={2} />}
             {option.label}
-            <span className={`rounded-full px-1.5 text-[10px] font-mono-num ${active ? "bg-black/20" : "bg-white/[0.05]"}`}>
+            <span className={`rounded-full px-1.5 py-[1px] text-[9.5px] font-mono-num ${active ? "bg-black/20" : "bg-white/[0.05]"}`}>
               {counts[option.id]}
             </span>
           </button>
@@ -373,7 +373,7 @@ export default function Transactions({
         <button
           type="button"
           onClick={() => setFiltersOpen(true)}
-          className={`relative grid h-[44px] w-[44px] shrink-0 place-items-center rounded-[14px] ring-1 ring-inset transition ${
+          className={`relative grid h-[42px] w-[42px] shrink-0 place-items-center rounded-[14px] ring-1 ring-inset transition ${
             accountFilter || methodFilter || showOnlyUnassigned
               ? "bg-[color:var(--accent)]/10 text-[color:var(--accent)] ring-[color:var(--accent)]/40"
               : "bg-[color:var(--bg-3)] text-[color:var(--ink-2)] ring-white/[0.06]"
@@ -384,7 +384,7 @@ export default function Transactions({
         </button>
       </div>
 
-      <div className="overflow-x-auto no-scrollbar">
+      <div className="-mx-4 overflow-x-auto px-4 no-scrollbar lg:mx-0 lg:px-0">
         <KindTabs value={kind} onChange={setKind} counts={counts} />
       </div>
 
