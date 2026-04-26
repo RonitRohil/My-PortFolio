@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+﻿import React, { useState } from "react";
 import initSqlJs from "sql.js";
 import sqlWasmUrl from "sql.js/dist/sql-wasm.wasm?url";
 import {
@@ -398,6 +398,13 @@ export default function Settings({
 
   return (
     <div className="space-y-4 px-4 pt-4 pb-8 lg:px-0">
+      <div>
+        <div className="font-display text-[20px] font-semibold">Settings</div>
+        <div className="text-[11.5px] text-[color:var(--ink-4)]">
+          Manage account, data and preferences
+        </div>
+      </div>
+
       <Card className="relative overflow-hidden">
         <div
           className="absolute inset-0 opacity-80"
@@ -407,10 +414,10 @@ export default function Settings({
           }}
         />
         <div className="relative">
-          <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-            <div className="flex items-start gap-3">
+          <div className="flex flex-col gap-4">
+            <div className="flex items-center gap-3">
               <div
-                className="grid h-14 w-14 place-items-center rounded-[18px] font-display text-[18px] font-semibold"
+                className="grid h-12 w-12 place-items-center rounded-full font-display text-[16px] font-semibold"
                 style={{
                   background:
                     "color-mix(in oklch, var(--accent) 18%, transparent)",
@@ -421,317 +428,255 @@ export default function Settings({
               >
                 RS
               </div>
-              <div>
-                <div className="text-[10.5px] font-semibold uppercase tracking-[0.12em] text-[color:var(--ink-4)]">
-                  Preferences
-                </div>
-                <div className="mt-1 font-display text-[24px] font-semibold">
-                  Your finance workspace
-                </div>
-                <div className="mt-1 max-w-xl text-[12.5px] text-[color:var(--ink-3)]">
-                  Control budgets, imports, exports, and category structure from
-                  one place while keeping everything local to this browser.
-                </div>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <Badge variant="success">Local-first</Badge>
-                  <Badge variant="info">Backup ready</Badge>
-                  <Badge variant="secondary">{accountCount} accounts</Badge>
+              <div className="min-w-0 flex-1">
+                <div className="text-[14.5px] font-semibold">Ronit S.</div>
+                <div className="text-[11.5px] text-[color:var(--ink-4)]">
+                  Single-owner workspace
                 </div>
               </div>
+              <Badge variant="secondary">Owner</Badge>
             </div>
-            <div className="grid grid-cols-3 gap-2 md:min-w-[290px]">
+            <div className="grid grid-cols-3 gap-2">
+              <ProfileMetric label="Accounts" value={String(accountCount)} />
+              <ProfileMetric label="Records" value={String(totalRecords)} />
               <ProfileMetric
                 label="Categories"
                 value={String(totalCategories)}
               />
-              <ProfileMetric
-                label="Budget"
-                value={compactINR(data.settings.monthlyBudget || 0)}
-              />
-              <ProfileMetric label="Records" value={String(totalRecords)} />
             </div>
           </div>
         </div>
       </Card>
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1.05fr_1fr]">
-        <Card
-          title="App Settings"
-          subtitle="Budget, reporting mode, and category structure."
-        >
-          <div className="space-y-3">
-            <SettingRow
-              icon="wallet"
-              label="Monthly budget"
-              description="Used for dashboard pacing and monthly spend tracking."
-            >
-              <div className="w-full md:w-[220px]">
-                <Input
-                  type="number"
-                  value={String(data.settings.monthlyBudget ?? 0)}
-                  onChange={(event) =>
-                    updateData({
-                      settings: {
-                        ...data.settings,
-                        monthlyBudget: Number(event.target.value) || 0,
-                      },
-                    })
-                  }
-                />
-              </div>
-            </SettingRow>
+      <SettingsSectionLabel title="Account" />
+      <Card padded={false}>
+        <SettingsListRow
+          icon="shield"
+          label="Workspace mode"
+          hint="Local-first browser workspace with backup-friendly tools."
+          action={<Badge variant="success">Local-first</Badge>}
+        />
+        <SettingsListRow
+          icon="sparkle"
+          label="Print / PDF"
+          hint="Open a print-friendly dashboard summary and save it as PDF."
+          action={
+            <Button variant="secondary" size="sm" onClick={handlePrintExport}>
+              Export PDF
+            </Button>
+          }
+        />
+      </Card>
 
-            <SettingRow
-              icon="calendar"
-              label="Year view"
-              description="Switch analytics between calendar and financial year."
-            >
-              <div className="w-full md:w-[220px]">
-                <Select
-                  value={data.settings.yearView}
-                  onChange={(event) =>
-                    updateData({
-                      settings: {
-                        ...data.settings,
-                        yearView: event.target
-                          .value as PortfolioData["settings"]["yearView"],
-                      },
-                    })
-                  }
-                >
-                  <option value="calendar">Calendar Year</option>
-                  <option value="financial">Financial Year</option>
-                </Select>
-              </div>
-            </SettingRow>
-
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-              <MiniPanel
-                title="Expense categories"
-                subtitle={`${expenseCategories.filter((item) => !item.parentId).length} top-level • ${expenseCategories.filter((item) => item.parentId).length} nested`}
-                tone="var(--warn)"
-              />
-              <MiniPanel
-                title="Income categories"
-                subtitle={`${incomeCategories.filter((item) => !item.parentId).length} top-level • ${incomeCategories.filter((item) => item.parentId).length} nested`}
-                tone="var(--pos)"
+      <SettingsSectionLabel title="Preferences" />
+      <Card padded={false}>
+        <SettingsListRow
+          icon="wallet"
+          label="Monthly budget"
+          hint="Used for dashboard pacing and monthly spend tracking."
+          action={
+            <div className="w-full md:w-[180px]">
+              <Input
+                type="number"
+                value={String(data.settings.monthlyBudget ?? 0)}
+                onChange={(event) =>
+                  updateData({
+                    settings: {
+                      ...data.settings,
+                      monthlyBudget: Number(event.target.value) || 0,
+                    },
+                  })
+                }
               />
             </div>
-          </div>
-        </Card>
-
-        <Card
-          title="Data Tools"
-          subtitle="Backup, restore, export, and import utilities."
-        >
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <ActionTile
-              icon="download"
-              title="Full backup"
-              description="Export your entire local dataset as JSON."
-              action={
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  block
-                  onClick={exportToJson}
-                >
-                  Export JSON
-                </Button>
-              }
-            />
-
-            <ActionTile
-              icon="upload"
-              title="Restore backup"
-              description="Import a previous JSON backup and replace the current dataset."
-              action={
-                <label className="block">
-                  <span className="sr-only">Import JSON backup</span>
-                  <div className="cursor-pointer">
-                    <Button variant="secondary" size="sm" block>
-                      Import JSON
-                    </Button>
-                  </div>
-                  <input
-                    type="file"
-                    accept=".json"
-                    onChange={importFromJson}
-                    className="hidden"
-                  />
-                </label>
-              }
-            />
-
-            <ActionTile
-              icon="database"
-              title="CSV exports"
-              description="Export investments or expenses into spreadsheet-friendly files."
-              action={
-                <div className="flex gap-2">
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    block
-                    onClick={() => exportToCsv("investments")}
-                  >
-                    Investments
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    block
-                    onClick={() => exportToCsv("expenses")}
-                  >
-                    Expenses
-                  </Button>
-                </div>
-              }
-            />
-
-            <ActionTile
-              icon="sparkle"
-              title="Print / PDF"
-              description="Open a print-friendly dashboard summary for saving as PDF."
-              action={
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  block
-                  onClick={handlePrintExport}
-                >
-                  Export PDF
-                </Button>
-              }
-            />
-          </div>
-
-          <div className="mt-4 rounded-[18px] bg-[color:var(--bg-3)] p-4 hairline">
-            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <div
-                    className="grid h-9 w-9 place-items-center rounded-[12px]"
-                    style={{
-                      background:
-                        "color-mix(in oklch, var(--info) 18%, transparent)",
-                      color: "var(--info)",
-                      boxShadow:
-                        "inset 0 0 0 1px color-mix(in oklch, var(--info) 35%, transparent)",
-                    }}
-                  >
-                    <Icon name="upload" size={16} />
-                  </div>
-                  <div>
-                    <div className="text-[13.5px] font-semibold">
-                      Import from myMoney (.sqlite)
-                    </div>
-                    <div className="text-[11.5px] text-[color:var(--ink-4)]">
-                      Reads the Android SQLite export in-browser and merges
-                      matching entries.
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <label className="block md:w-auto">
-                <span className="sr-only">Select SQLite file</span>
-                <div className="cursor-pointer">
-                  <Button block className="md:min-w-[190px]">
-                    Select SQLite File
-                  </Button>
-                </div>
-                <input
-                  type="file"
-                  accept=".sqlite,.db"
-                  className="hidden"
-                  onChange={handleMyMoneyImport}
-                />
-              </label>
+          }
+        />
+        <SettingsListRow
+          icon="calendar"
+          label="Year view"
+          hint="Switch analytics between calendar and financial year."
+          action={
+            <div className="w-full md:w-[180px]">
+              <Select
+                value={data.settings.yearView}
+                onChange={(event) =>
+                  updateData({
+                    settings: {
+                      ...data.settings,
+                      yearView: event.target
+                        .value as PortfolioData["settings"]["yearView"],
+                    },
+                  })
+                }
+              >
+                <option value="calendar">Calendar Year</option>
+                <option value="financial">Financial Year</option>
+              </Select>
             </div>
+          }
+        />
+        <SettingsListRow
+          icon="tags"
+          label="Manage categories"
+          hint={`${expenseCategories.filter((item) => !item.parentId).length} expense groups | ${incomeCategories.filter((item) => !item.parentId).length} income groups`}
+          action={
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() =>
+                document
+                  .getElementById("category-manager")
+                  ?.scrollIntoView({ behavior: "smooth", block: "start" })
+              }
+            >
+              Open manager
+            </Button>
+          }
+        />
+      </Card>
+
+      <SettingsSectionLabel title="Data" />
+      <Card padded={false}>
+        <SettingsListRow
+          icon="download"
+          label="Full backup"
+          hint="Export your complete portfolio dataset as JSON."
+          action={
+            <Button variant="secondary" size="sm" onClick={exportToJson}>
+              Export JSON
+            </Button>
+          }
+        />
+        <SettingsListRow
+          icon="upload"
+          label="Restore backup"
+          hint="Import a JSON backup and replace the current dataset."
+          action={
+            <label className="block">
+              <span className="sr-only">Import JSON backup</span>
+              <div className="cursor-pointer">
+                <Button variant="secondary" size="sm">Import JSON</Button>
+              </div>
+              <input
+                type="file"
+                accept=".json"
+                onChange={importFromJson}
+                className="hidden"
+              />
+            </label>
+          }
+        />
+        <SettingsListRow
+          icon="database"
+          label="CSV exports"
+          hint="Download investments or expenses in spreadsheet-friendly files."
+          action={
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => exportToCsv("investments")}
+              >
+                Investments
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => exportToCsv("expenses")}
+              >
+                Expenses
+              </Button>
+            </div>
+          }
+        />
+        <SettingsListRow
+          icon="upload"
+          label="Import from myMoney (.sqlite)"
+          hint="Read the Android SQLite export in-browser and merge matching entries."
+          action={
+            <label className="block">
+              <span className="sr-only">Select SQLite file</span>
+              <div className="cursor-pointer">
+                <Button size="sm">Select SQLite File</Button>
+              </div>
+              <input
+                type="file"
+                accept=".sqlite,.db"
+                className="hidden"
+                onChange={handleMyMoneyImport}
+              />
+            </label>
+          }
+        />
+      </Card>
+
+      <div id="category-manager">
+        <Card
+          title="Category Manager"
+          subtitle="Maintain grouped income and expense paths used across forms and reports."
+        >
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+            <CategoryManagerColumn
+              title="Expense tree"
+              categories={expenseCategories}
+              type="expense"
+              onCreate={() =>
+                setCategoryEditor({
+                  mode: "create",
+                  type: "expense",
+                  category: null,
+                })
+              }
+              onEdit={(category) =>
+                setCategoryEditor({ mode: "edit", type: "expense", category })
+              }
+              onDelete={handleDeleteCategory}
+            />
+            <CategoryManagerColumn
+              title="Income tree"
+              categories={incomeCategories}
+              type="income"
+              onCreate={() =>
+                setCategoryEditor({
+                  mode: "create",
+                  type: "income",
+                  category: null,
+                })
+              }
+              onEdit={(category) =>
+                setCategoryEditor({ mode: "edit", type: "income", category })
+              }
+              onDelete={handleDeleteCategory}
+            />
           </div>
         </Card>
       </div>
 
-      <Card
-        title="Category Manager"
-        subtitle="Maintain grouped income and expense paths used across forms and reports."
-      >
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-          <CategoryManagerColumn
-            title="Expense tree"
-            categories={expenseCategories}
-            type="expense"
-            onCreate={() =>
-              setCategoryEditor({
-                mode: "create",
-                type: "expense",
-                category: null,
-              })
-            }
-            onEdit={(category) =>
-              setCategoryEditor({ mode: "edit", type: "expense", category })
-            }
-            onDelete={handleDeleteCategory}
-          />
-          <CategoryManagerColumn
-            title="Income tree"
-            categories={incomeCategories}
-            type="income"
-            onCreate={() =>
-              setCategoryEditor({
-                mode: "create",
-                type: "income",
-                category: null,
-              })
-            }
-            onEdit={(category) =>
-              setCategoryEditor({ mode: "edit", type: "income", category })
-            }
-            onDelete={handleDeleteCategory}
-          />
-        </div>
-      </Card>
-
-      <Card className="border-[color:var(--neg)]/20 bg-[color:var(--neg)]/[0.05]">
-        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div className="flex items-start gap-3">
-            <div
-              className="grid h-11 w-11 place-items-center rounded-[14px]"
-              style={{
-                background: "color-mix(in oklch, var(--neg) 15%, transparent)",
-                color: "var(--neg)",
-                boxShadow:
-                  "inset 0 0 0 1px color-mix(in oklch, var(--neg) 30%, transparent)",
+      <SettingsSectionLabel title="Danger Zone" />
+      <Card padded={false}>
+        <SettingsListRow
+          icon="trash"
+          label="Clear all data"
+          hint="Delete all locally stored portfolio data from this browser. This cannot be undone."
+          destructive
+          action={
+            <Button
+              variant="danger"
+              size="sm"
+              onClick={() => {
+                if (
+                  confirm(
+                    "CRITICAL: This will delete ALL your data forever. Are you sure?",
+                  )
+                ) {
+                  void clearAllData();
+                }
               }}
             >
-              <Icon name="alert" size={18} />
-            </div>
-            <div>
-              <div className="font-display text-[16px] font-semibold text-[color:var(--neg)]">
-                Danger Zone
-              </div>
-              <div className="mt-1 text-[12px] text-[color:var(--ink-3)]">
-                Clear all locally stored portfolio data from this browser. This
-                cannot be undone.
-              </div>
-            </div>
-          </div>
-          <Button
-            variant="danger"
-            onClick={() => {
-              if (
-                confirm(
-                  "CRITICAL: This will delete ALL your data forever. Are you sure?",
-                )
-              ) {
-                void clearAllData();
-              }
-            }}
-          >
-            <Icon name="trash" size={15} />
-            Clear All Data
-          </Button>
-        </div>
+              Clear all
+            </Button>
+          }
+        />
       </Card>
 
       <Modal
@@ -864,6 +809,68 @@ function ProfileMetric({ label, value }: { label: string; value: string }) {
   );
 }
 
+function SettingsSectionLabel({ title }: { title: string }) {
+  return (
+    <div className="px-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-[color:var(--ink-4)]">
+      {title}
+    </div>
+  );
+}
+
+function SettingsListRow({
+  icon,
+  label,
+  hint,
+  action,
+  destructive = false,
+}: {
+  icon: React.ComponentProps<typeof Icon>["name"];
+  label: string;
+  hint: string;
+  action?: React.ReactNode;
+  destructive?: boolean;
+}) {
+  return (
+    <div className="border-t border-white/[0.05] first:border-t-0">
+      <div className="flex flex-col gap-3 px-4 py-3.5 md:flex-row md:items-center md:justify-between">
+        <div className="flex items-start gap-3">
+          <div
+            className="grid h-9 w-9 place-items-center rounded-[10px]"
+            style={
+              destructive
+                ? {
+                    background:
+                      "color-mix(in oklch, var(--neg) 15%, transparent)",
+                    color: "var(--neg)",
+                    boxShadow:
+                      "inset 0 0 0 1px color-mix(in oklch, var(--neg) 30%, transparent)",
+                  }
+                : {
+                    background: "rgba(255,255,255,0.03)",
+                    color: "var(--ink-2)",
+                    boxShadow: "inset 0 0 0 1px var(--line)",
+                  }
+            }
+          >
+            <Icon name={icon} size={16} />
+          </div>
+          <div className="min-w-0">
+            <div
+              className={`text-[13.5px] font-semibold ${destructive ? "text-[color:var(--neg)]" : "text-[color:var(--ink)]"}`}
+            >
+              {label}
+            </div>
+            <div className="mt-0.5 text-[11px] text-[color:var(--ink-4)]">
+              {hint}
+            </div>
+          </div>
+        </div>
+        {action && <div className="w-full md:w-auto">{action}</div>}
+      </div>
+    </div>
+  );
+}
+
 function MiniPanel({
   title,
   subtitle,
@@ -884,74 +891,6 @@ function MiniPanel({
       <div className="mt-1 text-[11.5px] text-[color:var(--ink-4)]">
         {subtitle}
       </div>
-    </div>
-  );
-}
-
-function SettingRow({
-  icon,
-  label,
-  description,
-  children,
-}: {
-  icon: React.ComponentProps<typeof Icon>["name"];
-  label: string;
-  description: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="flex flex-col gap-3 rounded-[16px] bg-[color:var(--bg-3)] p-4 hairline md:flex-row md:items-center md:justify-between">
-      <div className="flex items-start gap-3">
-        <div
-          className="grid h-10 w-10 place-items-center rounded-[12px]"
-          style={{
-            background: "rgba(255,255,255,0.03)",
-            color: "var(--ink-2)",
-            boxShadow: "inset 0 0 0 1px var(--line)",
-          }}
-        >
-          <Icon name={icon} size={16} />
-        </div>
-        <div className="min-w-0">
-          <div className="text-[13.5px] font-semibold">{label}</div>
-          <div className="mt-0.5 text-[11.5px] text-[color:var(--ink-4)]">
-            {description}
-          </div>
-        </div>
-      </div>
-      {children}
-    </div>
-  );
-}
-
-function ActionTile({
-  icon,
-  title,
-  description,
-  action,
-}: {
-  icon: React.ComponentProps<typeof Icon>["name"];
-  title: string;
-  description: string;
-  action: React.ReactNode;
-}) {
-  return (
-    <div className="rounded-[16px] bg-[color:var(--bg-3)] p-4 hairline">
-      <div
-        className="grid h-10 w-10 place-items-center rounded-[12px]"
-        style={{
-          background: "rgba(255,255,255,0.03)",
-          color: "var(--accent)",
-          boxShadow: "inset 0 0 0 1px var(--line)",
-        }}
-      >
-        <Icon name={icon} size={16} />
-      </div>
-      <div className="mt-3 text-[13.5px] font-semibold">{title}</div>
-      <div className="mt-1 min-h-[34px] text-[11.5px] text-[color:var(--ink-4)]">
-        {description}
-      </div>
-      <div className="mt-3">{action}</div>
     </div>
   );
 }

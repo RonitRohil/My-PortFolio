@@ -137,7 +137,7 @@ function DesktopSidebar({
   onSignOut: () => Promise<void>;
 }) {
   return (
-    <aside className="hidden lg:flex w-[248px] shrink-0 flex-col border-r border-white/[0.06] bg-[color:var(--bg-2)]/60">
+    <aside className="hidden h-[100dvh] min-h-0 shrink-0 flex-col border-r border-white/[0.06] bg-[color:var(--bg-2)]/60 lg:sticky lg:top-0 lg:flex lg:w-[248px]">
       <div className="flex items-center gap-2.5 px-5 py-5">
         <div
           className="grid h-9 w-9 place-items-center rounded-[10px]"
@@ -168,7 +168,7 @@ function DesktopSidebar({
         </button>
       </div>
 
-      <nav className="flex-1 space-y-0.5 px-3 overflow-y-auto no-scrollbar">
+      <nav className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-3 no-scrollbar">
         {DESKTOP_TABS.map((item) => {
           const active = tab === item.id;
           return (
@@ -189,7 +189,7 @@ function DesktopSidebar({
         })}
       </nav>
 
-      <div className="m-3 rounded-[14px] bg-[color:var(--bg-3)] p-3 hairline">
+      <div className="m-3 shrink-0 rounded-[14px] bg-[color:var(--bg-3)] p-3 hairline">
         <div className="flex items-center gap-2.5">
           <div
             className="grid h-8 w-8 place-items-center rounded-full font-display text-[11px] font-semibold"
@@ -272,7 +272,7 @@ function BottomNav({ active, onChange, onAdd }: { active: string; onChange: (id:
   const navActive = primaryIds.includes(active) ? active : "more";
 
   return (
-    <div className="sticky bottom-0 z-30 pb-[max(10px,env(safe-area-inset-bottom))] bg-gradient-to-t from-[color:var(--bg)] via-[color:var(--bg)] to-transparent pt-3">
+    <div className="sticky bottom-0 z-30 shrink-0 bg-gradient-to-t from-[color:var(--bg)] via-[color:var(--bg)] to-transparent pt-3 pb-[max(10px,env(safe-area-inset-bottom))]">
       <div className="relative mx-3 flex items-center rounded-[22px] bg-[color:var(--bg-2)] hairline-2 px-1.5 py-1.5 shadow-[0_14px_40px_-14px_rgba(0,0,0,0.8)]">
         {PRIMARY_TABS.slice(0, 2).map((tab) => (
           <NavBtn key={tab.id} tab={tab} active={navActive === tab.id} onClick={() => onChange(tab.id)} />
@@ -561,23 +561,23 @@ export default function Layout({
   };
 
   return (
-    <div className="min-h-[100dvh] w-full bg-[color:var(--bg)]">
-      <div className="mx-auto flex min-h-[100dvh] w-full max-w-[1400px]">
+    <div className="h-[100dvh] w-full overflow-hidden bg-[color:var(--bg)]">
+      <div className="mx-auto flex h-[100dvh] w-full max-w-[1400px] overflow-hidden">
         <DesktopSidebar tab={activeTab} go={go} openAdd={() => setAddOpen(true)} syncing={syncing} onSignOut={onSignOut} />
-        <div className="phone-shell flex min-w-0 flex-1 flex-col mx-auto lg:mx-0">
+        <div className="phone-shell mx-auto flex min-w-0 flex-1 flex-col overflow-hidden lg:mx-0">
           <div className="mobile-only">
             <Header syncing={syncing} />
           </div>
 
           <DesktopTopbar syncing={syncing} lastSync={lastSync} />
 
-          <main className="flex-1 overflow-y-auto scroll-area" id="main-scroll">
+          <main className="scroll-area min-h-0 flex-1 overflow-y-auto" id="main-scroll">
             <div className="mx-auto w-full lg:max-w-[1080px] lg:px-6">
               {children}
             </div>
           </main>
 
-          <div className="mobile-only">
+          <div className="mobile-only shrink-0">
             <BottomNav active={activeTab} onChange={go} onAdd={() => setAddOpen(true)} />
           </div>
         </div>
